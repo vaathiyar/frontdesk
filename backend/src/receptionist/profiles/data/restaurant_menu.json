@@ -1,0 +1,9 @@
+{
+  "items": [
+    { "name": "Margherita Pizza", "price": 16 },
+    { "name": "Spaghetti Carbonara", "price": 19 },
+    { "name": "Caesar Salad", "price": 12 },
+    { "name": "Grilled Salmon", "price": 24 },
+    { "name": "Tiramisu", "price": 9 }
+  ]
+}
