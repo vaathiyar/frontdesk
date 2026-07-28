@@ -1,4 +1,7 @@
-"""The confirmation text: what it says, and whether it gets sent."""
+"""Confirmation-text variants, and the Telnyx call that sends it.
+
+The guarantee that the facts come from the record lives in `tests/test_confirmation.py`.
+"""
 
 from __future__ import annotations
 
@@ -76,31 +79,6 @@ def test_nothing_is_texted_when_the_call_produced_nothing() -> None:
     record = CallRecord(profile_id="hvac", caller_number=CALLER)
     record.outcome = Outcome.ABANDONED
     assert confirmation(get_profile("hvac"), record) == ""
-
-
-async def test_the_model_writes_the_opening_and_code_writes_the_facts() -> None:
-    record = booked_call()
-    record.said("caller", "my furnace quit")
-    model = ScriptedModel(replies=[says("Hi Sam, sorry about the furnace trouble.")])
-
-    text = await compose_sms(get_profile("hvac"), record, model)
-
-    assert text.startswith("Hi Sam, sorry about the furnace trouble.")
-    assert "Booked: furnace repair" in text
-
-
-async def test_a_failed_model_call_still_sends_the_facts() -> None:
-    class Broken(ScriptedModel):
-        def _generate(self, *args: Any, **kwargs: Any) -> Any:
-            raise RuntimeError("gemini is down")
-
-    record = booked_call()
-    record.said("caller", "my furnace quit")
-
-    text = await compose_sms(get_profile("hvac"), record, Broken())
-
-    assert "Booked: furnace repair" in text
-    assert "10:00 AM" in text
 
 
 async def test_an_abandoned_call_is_never_texted() -> None:
@@ -201,23 +179,6 @@ async def test_a_telnyx_rejection_surfaces_its_reason(
 # --- finishing the call ---------------------------------------------------------
 
 
-async def test_finishing_saves_the_call_and_notes_the_text_was_not_sent(
-    tmp_path: Path,
-) -> None:
-    store = CallStore(tmp_path / "calls.db")
-    record = booked_call()
-    record.said("caller", "my furnace quit")
-
-    text = await finish_call(
-        get_profile("hvac"), record, store=store, model=ScriptedModel(replies=[says("All set.")])
-    )
-
-    assert "Booked: furnace repair" in text
-    assert record.ended_at is not None
-    assert [e.type for e in record.events] == ["sms_skipped"]
-    assert await store.get(record.id) is not None
-
-
 async def test_a_failed_text_still_saves_the_call(
     tmp_path: Path, telnyx_configured: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -237,12 +198,30 @@ async def test_a_failed_text_still_saves_the_call(
     assert [e.type for e in saved.events] == ["sms_failed"]
 
 
-async def test_an_unanswered_call_is_marked_abandoned(tmp_path: Path) -> None:
+async def test_a_caller_who_never_spoke_is_marked_abandoned(tmp_path: Path) -> None:
     store = CallStore(tmp_path / "calls.db")
     record = CallRecord(profile_id="hvac", caller_number=CALLER)
 
     assert await finish_call(get_profile("hvac"), record, store=store) == ""
     assert record.outcome is Outcome.ABANDONED
+
+
+async def test_a_caller_who_only_asked_a_question_was_answered_not_abandoned(
+    tmp_path: Path,
+) -> None:
+    """No tool sets an outcome for a plain question, since the facts are in the prompt.
+    Reporting that call as abandoned would misrepresent it to the business owner."""
+    store = CallStore(tmp_path / "calls.db")
+    record = CallRecord(profile_id="hvac", caller_number=CALLER)
+    record.said("agent", "Thanks for calling.")
+    record.said("caller", "what are your hours?")
+    record.said("agent", "Monday to Saturday, 8 to 6.")
+
+    text = await finish_call(get_profile("hvac"), record, store=store)
+
+    assert record.outcome is Outcome.ANSWERED
+    # Nothing to confirm, so nobody gets a text for asking the opening hours.
+    assert text == ""
 
 
 def _use_transport(monkeypatch: pytest.MonkeyPatch, transport: httpx.MockTransport) -> None:

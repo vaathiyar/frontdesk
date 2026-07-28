@@ -34,8 +34,7 @@ async def finish_call(
     """Close the call, text the caller, persist it. Returns the text that was composed."""
     record.ended_at = datetime.now(UTC)
     if record.outcome is None:
-        # The caller hung up, or never asked for anything we act on.
-        record.outcome = Outcome.ABANDONED
+        record.outcome = _what_happened(record)
 
     text = await compose_sms(profile, record, model)
     if text:
@@ -52,6 +51,18 @@ async def finish_call(
 
     await (store or CallStore()).save(record)
     return text
+
+
+def _what_happened(record: CallRecord) -> Outcome:
+    """No tool set an outcome, so infer one from whether the caller got anywhere.
+
+    A caller who asked something and was answered has been served — recording that as
+    ABANDONED would misreport the call to the business owner. Nothing is texted either
+    way: someone who only asked the opening hours does not want a follow-up message.
+    """
+    if any(turn.role == "caller" for turn in record.transcript):
+        return Outcome.ANSWERED
+    return Outcome.ABANDONED
 
 
 def summarise(record: CallRecord) -> str:

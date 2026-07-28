@@ -2,20 +2,28 @@
 
 The fake enforces the guarantee in code: `create_event` refuses a time that isn't
 open, so the agent cannot book over an existing appointment even if the model skips
-checking availability first. Both backends work off the same hours grid below, so
-what you see in the REPL is what a real calendar would offer.
+checking availability first. Both backends build their openings from the same
+`slot_grid` and the same profile hours, so what you see in the REPL is what a real
+calendar would offer — the two disagreeing is the bug this arrangement exists to avoid.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    # Import-time only: `receptionist.profiles` pulls in the tools, which import this
+    # module, so importing Profile for real here would be a cycle.
+    from receptionist.profiles import Profile
 
 from receptionist.services.when import fmt_time, resolve_datetime, spoken, timezone
 
-# Business hours. Appointments start on the grid and must end by closing.
+# Default business hours — a trades day. Hours differ per business, so a profile sets its
+# own (`Profile.opens` / `Profile.closes`); a restaurant taking 7pm reservations does not
+# share a furnace shop's 8-to-6.
 OPEN_HOUR = 8
 CLOSE_HOUR = 18
 SLOT_MINUTES = 60
@@ -55,11 +63,11 @@ class CalendarService(Protocol):
     async def cancel(self, caller_number: str) -> str: ...
 
 
-def slot_grid(on: date) -> list[datetime]:
+def slot_grid(on: date, open_hour: int = OPEN_HOUR, close_hour: int = CLOSE_HOUR) -> list[datetime]:
     """Candidate start times on `on` whose appointment still ends by closing."""
     tz = timezone()
-    opens = datetime.combine(on, time(OPEN_HOUR), tzinfo=tz)
-    closes = datetime.combine(on, time(CLOSE_HOUR), tzinfo=tz)
+    opens = datetime.combine(on, time(open_hour), tzinfo=tz)
+    closes = datetime.combine(on, time(close_hour), tzinfo=tz)
     starts, cursor = [], opens
     while cursor + timedelta(minutes=APPOINTMENT_MINUTES) <= closes:
         starts.append(cursor)
@@ -71,17 +79,25 @@ def slot_grid(on: date) -> list[datetime]:
 class FakeCalendarService:
     """In-memory calendar, one active appointment per caller number.
 
-    Seeds tomorrow at 8:00 AM as busy so a demo call visibly declines a taken time —
+    Seeds tomorrow's first opening as busy so a demo call visibly declines a taken time —
     the most convincing thing to show a prospect.
     """
 
+    open_hour: int = OPEN_HOUR
+    close_hour: int = CLOSE_HOUR
     busy: dict[str, set[str]] = field(default_factory=dict)
     _held: dict[str, Booked] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.busy:
-            tomorrow = (datetime.now(timezone()) + timedelta(days=1)).date()
-            self.busy = {tomorrow.isoformat(): {"8:00 AM"}}
+        if self.busy:
+            return
+        tomorrow = (datetime.now(timezone()) + timedelta(days=1)).date()
+        openings = self._grid(tomorrow)
+        if openings:
+            self.busy = {tomorrow.isoformat(): {fmt_time(openings[0])}}
+
+    def _grid(self, on: date) -> list[datetime]:
+        return slot_grid(on, self.open_hour, self.close_hour)
 
     async def available_slots(self, day: str) -> list[str]:
         from receptionist.services.when import resolve_date
@@ -90,7 +106,7 @@ class FakeCalendarService:
         on = resolve_date(day, now.date())
         taken = self.busy.get(on.isoformat(), set())
         # `s > now` drops times already past, matching what a real calendar would offer.
-        return [fmt_time(s) for s in slot_grid(on) if s > now and fmt_time(s) not in taken]
+        return [fmt_time(s) for s in self._grid(on) if s > now and fmt_time(s) not in taken]
 
     async def create_event(
         self, caller_number: str, *, service: str, day: str, time: str
@@ -112,9 +128,13 @@ class FakeCalendarService:
         held = self._held.get(caller_number)
         if held is None:
             raise NoBooking("no existing booking for this caller")
-        if time not in await self.available_slots(day):
-            raise SlotUnavailable(f"{time} on {day} is not available")
+        # Release the caller's own slot before checking, or moving to the time they
+        # already hold looks like a clash with themselves. GoogleCalendarService excludes
+        # the caller's own event for the same reason; the two must agree.
         self._free(held)
+        if time not in await self.available_slots(day):
+            self._mark_busy(held)
+            raise SlotUnavailable(f"{time} on {day} is not available")
         starts_at = resolve_datetime(day, time, tz=timezone())
         moved = Booked(
             event_id=held.event_id,
@@ -142,17 +162,18 @@ class FakeCalendarService:
         self.busy.get(key, set()).discard(fmt_time(booked.starts_at))
 
 
-def build_calendar(profile_id: str) -> CalendarService:
+def build_calendar(profile: Profile) -> CalendarService:
     """The real Google Calendar when this profile has one configured, else the fake.
 
-    The Google import stays lazy so the offline path never loads googleapiclient.
+    Either way it books inside the profile's own hours. The Google import stays lazy so
+    the offline path never loads googleapiclient.
     """
     from receptionist.settings import settings
 
-    calendar_id = settings.calendar_ids.get(profile_id)
+    calendar_id = settings.calendar_ids.get(profile.id)
     if not calendar_id:
-        return FakeCalendarService()
+        return FakeCalendarService(profile.opens, profile.closes)
 
     from receptionist.services.google_calendar import GoogleCalendarService
 
-    return GoogleCalendarService(calendar_id)
+    return GoogleCalendarService(calendar_id, open_hour=profile.opens, close_hour=profile.closes)

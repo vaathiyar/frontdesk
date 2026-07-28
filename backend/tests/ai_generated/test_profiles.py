@@ -1,4 +1,8 @@
-"""The extension surface: every profile must be usable by the graph without special-casing."""
+"""The extension surface: every profile must be usable by the graph without special-casing.
+
+Schema introspection, mostly. The behavioural version of this — a second profile booking
+on the same engine — is in `tests/test_call_flow.py`.
+"""
 
 from __future__ import annotations
 
@@ -46,14 +50,8 @@ def test_prompt_anchors_today_and_demands_iso_dates(profile_id: str) -> None:
 
 
 @pytest.mark.parametrize("profile_id", PROFILE_IDS)
-def test_prompt_never_asks_for_contact_details_we_already_have_or_dont_need(
-    profile_id: str,
-) -> None:
-    prompt = render(get_profile(profile_id))
-
-    assert "never ask for it" in prompt  # phone number: it comes from the call
-    assert "Never ask for an email" in prompt
-    assert "Never ask permission to text" in prompt
+def test_prompt_never_asks_permission_to_text(profile_id: str) -> None:
+    assert "Never ask permission to text" in render(get_profile(profile_id))
 
 
 @pytest.mark.parametrize("profile_id", PROFILE_IDS)

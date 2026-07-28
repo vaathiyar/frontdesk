@@ -21,6 +21,8 @@ from dateutil import parser as dateparser
 
 from receptionist.services.calendar import (
     APPOINTMENT_MINUTES,
+    CLOSE_HOUR,
+    OPEN_HOUR,
     Booked,
     NoBooking,
     SlotUnavailable,
@@ -53,15 +55,25 @@ def _build_client() -> Any:
 class GoogleCalendarService:
     """One calendar per profile. `client` is injectable so tests drive it offline."""
 
-    def __init__(self, calendar_id: str, *, client: Any | None = None) -> None:
+    def __init__(
+        self,
+        calendar_id: str,
+        *,
+        open_hour: int = OPEN_HOUR,
+        close_hour: int = CLOSE_HOUR,
+        client: Any | None = None,
+    ) -> None:
         self._calendar_id = calendar_id
+        self._open_hour = open_hour
+        self._close_hour = close_hour
         self._tz = timezone()
         self._tzname = settings.timezone
         self._client = client if client is not None else _build_client()
 
     async def available_slots(self, day: str) -> list[str]:
         now = datetime.now(self._tz)
-        candidates = [s for s in slot_grid(resolve_date(day, now.date())) if s > now]
+        grid = slot_grid(resolve_date(day, now.date()), self._open_hour, self._close_hour)
+        candidates = [s for s in grid if s > now]
         if not candidates:
             return []
         busy = await self._busy(candidates[0], candidates[-1] + self._length)

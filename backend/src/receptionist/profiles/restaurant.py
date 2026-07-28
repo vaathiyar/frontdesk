@@ -58,4 +58,8 @@ RESTAURANT = Profile(
     ),
     knowledge=f"Hours are Tuesday to Sunday, 5pm to 10pm. On the menu: {_menu()}.",
     book=book,
+    # Dinner service only, matching the hours above. Without this the calendar would
+    # offer a trades-hours grid and refuse every evening table a caller asked for.
+    opens=17,
+    closes=22,
 )

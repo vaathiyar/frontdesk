@@ -23,3 +23,8 @@ class Profile:
     knowledge: str  # facts the agent may state: hours, pricing, menu
     book: BaseTool  # this profile's booking tool; its parameters are its fields
     extra_tools: tuple[BaseTool, ...] = field(default=())
+    # When this business takes appointments, as 24-hour clock hours. The last appointment
+    # must END by `closes`, so 8..18 means a final start at 5pm. These have to match the
+    # hours stated in `knowledge`, or the agent offers times the calendar then refuses.
+    opens: int = 8
+    closes: int = 18

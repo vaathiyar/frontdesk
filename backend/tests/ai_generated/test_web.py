@@ -1,4 +1,8 @@
-"""The call-detail page, and the 404 that must never become an oracle."""
+"""Every section of the call-detail page, and each way of failing to produce one.
+
+The two guarantees that matter — the signed link works, and every rejection looks
+identical — are in `tests/test_call_page.py`.
+"""
 
 from __future__ import annotations
 
@@ -55,23 +59,6 @@ def visit(client: TestClient, record: CallRecord) -> object:
 
 async def test_healthz_is_answerable(client: TestClient) -> None:
     assert client.get("/healthz").json() == {"ok": True}
-
-
-async def test_a_signed_link_shows_the_booking_and_a_calendar_button(
-    store: CallStore, client: TestClient
-) -> None:
-    record = booked_call()
-    await store.save(record)
-
-    response = visit(client, record)
-
-    assert response.status_code == 200
-    body = response.text
-    assert "Helpdesk Heating and Cooling" in body
-    assert "furnace repair" in body
-    assert "10:00 AM" in body
-    assert "Add to Google Calendar" in body
-    assert "calendar.google.com/calendar/render" in body
 
 
 async def test_the_page_shows_the_details_timeline_and_transcript(
@@ -139,20 +126,3 @@ async def test_an_unknown_call_is_not_found(store: CallStore, client: TestClient
 
 async def test_a_malformed_id_is_not_found(store: CallStore, client: TestClient) -> None:
     assert client.get("/c/not-a-uuid?t=whatever").status_code == 404
-
-
-async def test_every_rejection_returns_the_very_same_page(
-    store: CallStore, client: TestClient
-) -> None:
-    """If the responses differed, they would reveal which call ids exist."""
-    record = booked_call()
-    await store.save(record)
-    unknown = uuid4()
-
-    bodies = {
-        client.get(f"/c/{record.id}?t={'0' * 16}").text,
-        client.get(f"/c/{record.id}").text,
-        client.get(f"/c/{unknown}?t={sign(unknown)}").text,
-        client.get("/c/not-a-uuid?t=whatever").text,
-    }
-    assert len(bodies) == 1

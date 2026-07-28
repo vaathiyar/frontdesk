@@ -39,7 +39,11 @@ async def call(profile_id: str, caller_number: str, fake_calendar: bool) -> None
         print(f"Unknown profile {profile_id!r}. Choose one of: {', '.join(PROFILES)}")
         return
 
-    calendar = FakeCalendarService() if fake_calendar else build_calendar(profile.id)
+    calendar = (
+        FakeCalendarService(profile.opens, profile.closes)
+        if fake_calendar
+        else build_calendar(profile)
+    )
     record = CallRecord(profile_id=profile.id, caller_number=caller_number)
     chat = Conversation(profile, calendar, record)
 
