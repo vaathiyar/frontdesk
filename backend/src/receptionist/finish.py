@@ -1,23 +1,57 @@
 """Everything that happens when a call ends, in one place.
 
 Both drivers call `finish_call`: the REPL when you quit, the voice worker on hang-up.
-Keeping it here is what stops the two paths from drifting on what "a finished call"
-means — including the confirmation text, which must go out exactly once.
+Keeping it here is what stops the two paths from drifting on what a finished call means.
+
+Order matters. The text goes out first and the outcome of sending is recorded on the
+record, so the saved call says whether the caller was actually told. A failed text must
+never cost us the record itself.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
+
+from langchain_core.language_models import BaseChatModel
 
 from receptionist.models import CallRecord, Outcome
 from receptionist.profiles import Profile
+from receptionist.services.sms import SmsError, send_sms
+from receptionist.services.summary import compose_sms
+from receptionist.store import CallStore
+
+logger = logging.getLogger(__name__)
 
 
-async def finish_call(profile: Profile, record: CallRecord) -> None:
+async def finish_call(
+    profile: Profile,
+    record: CallRecord,
+    *,
+    store: CallStore | None = None,
+    model: BaseChatModel | None = None,
+) -> str:
+    """Close the call, text the caller, persist it. Returns the text that was composed."""
     record.ended_at = datetime.now(UTC)
     if record.outcome is None:
         # The caller hung up, or never asked for anything we act on.
         record.outcome = Outcome.ABANDONED
+
+    text = await compose_sms(profile, record, model)
+    if text:
+        try:
+            message_id = await send_sms(record.caller_number, text)
+        except SmsError as exc:
+            logger.warning("could not text %s: %s", record.caller_number, exc)
+            record.emit("sms_failed", str(exc))
+        else:
+            if message_id:
+                record.emit("sms_sent", f"to {record.caller_number} ({message_id})")
+            else:
+                record.emit("sms_skipped", "no Telnyx credentials for this number")
+
+    await (store or CallStore()).save(record)
+    return text
 
 
 def summarise(record: CallRecord) -> str:

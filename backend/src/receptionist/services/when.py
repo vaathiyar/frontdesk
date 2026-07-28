@@ -61,12 +61,19 @@ def spoken(when: datetime) -> str:
 
 
 def describe_now(now: datetime | None = None) -> str:
-    """The prompt's date anchor. Without it the model cannot turn "the day after
-    tomorrow" into a date, which is the whole reason we ask for ISO."""
+    """The prompt's date anchor.
+
+    Today's and tomorrow's ISO dates are both spelled out, because "tomorrow" is by far
+    the most common thing a caller says and models get the arithmetic wrong — one
+    observed call booked today at 8am for a caller who had asked for tomorrow morning.
+    Handing over both dates removes the calculation instead of trusting it.
+    """
     current = now or datetime.now(timezone())
+    tomorrow = current + timedelta(days=1)
     return (
         f"{current:%A}, {current:%B} {current.day}, {current.year} "
-        f"at {fmt_time(current)} ({settings.timezone})"
+        f"at {fmt_time(current)} ({settings.timezone}). "
+        f"Today's date is {current:%Y-%m-%d} and tomorrow's is {tomorrow:%Y-%m-%d}"
     )
 
 

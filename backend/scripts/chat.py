@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from textwrap import indent
 
 import dotenv
 
@@ -66,8 +67,12 @@ async def call(profile_id: str, caller_number: str, fake_calendar: bool) -> None
                 print("[hint] check GOOGLE_API_KEY / GOOGLE_CREDENTIALS_FILE_PATH in .env")
             return
 
-    await finish_call(profile, record)
+    text = await finish_call(profile, record)
     print(summarise(record))
+    if text:
+        print(f"\n  confirmation text to {caller_number}:")
+        print(indent(text, "  │ "))
+        print()
 
 
 def _looks_like_bad_credentials(exc: Exception) -> bool:
