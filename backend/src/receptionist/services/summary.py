@@ -102,6 +102,6 @@ async def _prose(profile: Profile, record: CallRecord, model: BaseChatModel | No
 
 
 def _default_model() -> BaseChatModel:
-    from receptionist.graph import chat_model
+    from receptionist.agent.graph import chat_model
 
     return chat_model()

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from receptionist.graph import build_graph
+from receptionist.agent.graph import build_graph
+from receptionist.agent.prompt import render
+from receptionist.agent.tools import SHARED_TOOLS
 from receptionist.profiles import PROFILES, UnknownProfile, get_profile
-from receptionist.prompt import render
-from receptionist.tools import SHARED_TOOLS
 from tests.fakes import ScriptedModel
 
 PROFILE_IDS = list(PROFILES)

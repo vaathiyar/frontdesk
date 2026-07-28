@@ -8,8 +8,8 @@ from pathlib import Path
 from langchain_core.tools import tool
 from langgraph.prebuilt.tool_node import ToolRuntime
 
+from receptionist.agent.tools import CallContext, save_booking
 from receptionist.profiles.profile import Profile
-from receptionist.tools import CallContext, save_booking
 
 _MENU_PATH = Path(__file__).parent / "restaurant_menu.json"
 

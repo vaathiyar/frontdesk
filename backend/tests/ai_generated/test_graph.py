@@ -5,7 +5,7 @@ The booking guarantees themselves live in `tests/test_call_flow.py`.
 
 from __future__ import annotations
 
-from receptionist.graph import STUCK, Conversation
+from receptionist.agent.graph import STUCK, Conversation
 from receptionist.models import CallRecord
 from receptionist.profiles import get_profile
 from receptionist.services.calendar import FakeCalendarService

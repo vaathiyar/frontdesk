@@ -22,12 +22,12 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph import START, StateGraph, add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from receptionist.agent.prompt import render
+from receptionist.agent.tools import SHARED_TOOLS, CallContext, explain_to_model
 from receptionist.models import CallRecord
 from receptionist.profiles import Profile
-from receptionist.prompt import render
 from receptionist.services.calendar import CalendarService
 from receptionist.settings import settings
-from receptionist.tools import SHARED_TOOLS, CallContext, explain_to_model
 
 CHAT_MODEL = "gemini-3.5-flash-lite"
 CHAT_EFFORT = "medium"  # thinking_level — Google's recommendation for agentic tool use

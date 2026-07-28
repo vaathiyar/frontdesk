@@ -23,8 +23,8 @@ import dotenv
 
 dotenv.load_dotenv()
 
+from receptionist.agent.graph import Conversation  # noqa: E402
 from receptionist.finish import finish_call, summarise  # noqa: E402
-from receptionist.graph import Conversation  # noqa: E402
 from receptionist.models import CallRecord  # noqa: E402
 from receptionist.profiles import PROFILES, UnknownProfile, get_profile  # noqa: E402
 from receptionist.services.calendar import FakeCalendarService, build_calendar  # noqa: E402

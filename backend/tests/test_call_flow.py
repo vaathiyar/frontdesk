@@ -8,10 +8,10 @@ in-memory calendar, so a booking that "happened" actually took a slot.
 
 from __future__ import annotations
 
-from receptionist.graph import Conversation
+from receptionist.agent.graph import Conversation
+from receptionist.agent.prompt import render
 from receptionist.models import CallRecord, Outcome
 from receptionist.profiles import get_profile
-from receptionist.prompt import render
 from receptionist.services.calendar import FakeCalendarService
 from tests.fakes import CALLER, ScriptedModel, calls, says
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 from langchain_core.tools import tool
 from langgraph.prebuilt.tool_node import ToolRuntime
 
+from receptionist.agent.tools import CallContext, save_booking
 from receptionist.profiles.profile import Profile
-from receptionist.tools import CallContext, save_booking
 
 
 @tool(parse_docstring=True)
