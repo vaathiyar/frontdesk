@@ -50,13 +50,16 @@ async def call(profile_id: str, caller_number: str, fake_calendar: bool) -> None
     which = "in-memory" if isinstance(calendar, FakeCalendarService) else "Google Calendar"
     print(f"\n  {profile.business}   (profile: {profile.id}, caller: {caller_number})")
     print(f"  booking against: {which}")
-    print("  Type as the caller. Ctrl-D or 'quit' ends the call.\n")
+    print("  Type as the caller. The agent hangs up when your business is done;")
+    print("  'quit' or Ctrl-D hangs up from your end. Ctrl-C aborts without recording.\n")
     print(f"agent> {chat.greet()}")
 
     while True:
         try:
             said = (await asyncio.to_thread(input, "caller> ")).strip()
         except EOFError:
+            # The caller hung up. Falling through to finish_call is the point: a dropped
+            # call still has to be recorded, and still counts as abandoned.
             print()
             break
         if said.lower() in {"quit", "exit"}:
@@ -70,6 +73,9 @@ async def call(profile_id: str, caller_number: str, fake_calendar: bool) -> None
             if _looks_like_bad_credentials(exc):
                 print("[hint] check GOOGLE_API_KEY / GOOGLE_CREDENTIALS_FILE_PATH in .env")
             return
+        if chat.over:
+            print("\n  [the agent ended the call]")
+            break
 
     text = await finish_call(profile, record)
     print(summarise(record))
@@ -98,7 +104,12 @@ def main() -> None:
         help="book in memory even if this profile has a real Google Calendar configured",
     )
     args = parser.parse_args()
-    asyncio.run(call(args.profile, args.caller, args.fake_calendar))
+    try:
+        asyncio.run(call(args.profile, args.caller, args.fake_calendar))
+    except KeyboardInterrupt:
+        # asyncio raises this inside the event loop, past the point where the call could
+        # still be finalised. One line beats a traceback; use 'quit' for a clean hang-up.
+        print("\n  [aborted — the call was not recorded]")
 
 
 if __name__ == "__main__":

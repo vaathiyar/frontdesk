@@ -25,6 +25,9 @@ class CallContext:
 
     calendar: CalendarService
     record: CallRecord
+    # Set by `end_call`. The driver hangs up only after the goodbye has been delivered —
+    # cutting the line mid-sentence is worse than a caller waiting a beat.
+    over: bool = False
 
 
 def explain_to_model(exc: Exception) -> str:
@@ -165,7 +168,16 @@ async def take_message(name: str, reason: str, runtime: ToolRuntime[CallContext]
     return "Got it, I'll pass that along. Anything else?"
 
 
-SHARED_TOOLS = [check_availability, reschedule, cancel, take_message]
+@tool
+async def end_call(runtime: ToolRuntime[CallContext]) -> str:
+    """Hang up, once everything is settled and the caller has nothing else."""
+    call = runtime.context
+    call.over = True
+    call.record.emit("call_ended", "the agent ended the call")
+    return "The call will end after your next reply. Say a short goodbye now."
+
+
+SHARED_TOOLS = [check_availability, reschedule, cancel, take_message, end_call]
 
 
 def _describe(details: dict[str, str]) -> str:

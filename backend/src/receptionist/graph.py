@@ -95,6 +95,11 @@ class Conversation:
         self._graph = build_graph(profile, model)
         self._history: list[AnyMessage] = []
 
+    @property
+    def over(self) -> bool:
+        """True once the agent has hung up — read it after the reply has been delivered."""
+        return self.call.over
+
     def greet(self) -> str:
         self.call.record.said("agent", self.profile.greeting)
         self._history.append(AIMessage(self.profile.greeting))

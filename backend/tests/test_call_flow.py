@@ -235,6 +235,30 @@ async def test_the_restaurant_profile_books_an_evening_table_on_the_same_engine(
     assert record.booking.details == {"name": "Priya", "party_size": "4"}
 
 
+async def test_the_agent_hangs_up_only_after_its_goodbye_is_delivered(
+    calendar: FakeCalendarService,
+) -> None:
+    """`end_call` marks the call over but the driver still delivers the reply — cutting
+    the line mid-sentence is worse than the caller waiting a beat."""
+    model = ScriptedModel(replies=[calls("end_call"), says("Glad I could help. Take care!")])
+    chat = dial("hvac", model, calendar)
+
+    goodbye = await chat.say("no, that's everything, thanks")
+
+    assert goodbye == "Glad I could help. Take care!"
+    assert chat.over
+    assert chat.call.record.transcript[-1].text == goodbye
+    assert [e.type for e in chat.call.record.events] == ["call_ended"]
+
+
+async def test_the_call_is_not_over_until_the_agent_says_so(
+    calendar: FakeCalendarService,
+) -> None:
+    chat = dial("hvac", ScriptedModel(replies=[says("Sure, what day suits you?")]), calendar)
+    await chat.say("I need someone to look at my furnace")
+    assert not chat.over
+
+
 def test_the_caller_is_never_asked_for_a_phone_number_or_an_email() -> None:
     """The number comes from caller ID, and nothing downstream needs an email address."""
     for profile_id in ("hvac", "restaurant"):
