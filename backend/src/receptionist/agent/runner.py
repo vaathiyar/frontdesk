@@ -1,12 +1,12 @@
 """Drives the tool-use loop over a Receptionist.
 
-This is the documented Anthropic manual loop (call → if stop_reason == tool_use,
+This is the standard manual tool-use loop (call → if the model returns tool_use,
 run tools, append tool_result, repeat → else return text). The voice agent will use
 the same loop later with audio in/out; here it runs over typed text so the whole
 brain is exercisable without LiveKit, STT, or TTS.
 
-`messages_api` is `AsyncAnthropic().messages` in production and a scripted fake in
-tests — the one seam that needs the network.
+`messages_api` is the chat provider (the Gemini adapter from providers/factory.py)
+in production and a scripted fake in tests — the one seam that needs the network.
 """
 
 from __future__ import annotations
@@ -14,10 +14,16 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from receptionist.core.models import TranscriptTurn
-from receptionist.core.settings import settings
 from receptionist.profiles.base import Receptionist
 
 _MAX_TOOL_ROUNDS = 8  # guard against a tool-call loop that never resolves
+
+# Chat model parameters — fixed in code, not env-configurable. CHAT_EFFORT maps to
+# Gemini's thinking_level (minimal|low|medium|high); "medium" is Google's recommended
+# default for agentic tool use. Override per-instance via ConversationRunner(...).
+CHAT_MODEL = "gemini-3.5-flash-lite"
+CHAT_EFFORT = "medium"
+CHAT_MAX_TOKENS = 4096
 
 
 class MessagesAPI(Protocol):
@@ -36,9 +42,9 @@ class ConversationRunner:
     ) -> None:
         self._agent = receptionist
         self._messages_api = messages_api
-        self._model = model or settings.llm_model
-        self._max_tokens = max_tokens or settings.llm_max_tokens
-        self._effort = effort or settings.llm_effort
+        self._model = model or CHAT_MODEL
+        self._max_tokens = max_tokens or CHAT_MAX_TOKENS
+        self._effort = effort or CHAT_EFFORT
         self._history: list[dict[str, Any]] = []
 
     async def send(self, caller_text: str) -> str:

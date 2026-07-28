@@ -1,0 +1,19 @@
+{
+  "dispatch_rule": {
+    "name": "Restaurant inbound → receptionist",
+    "trunk_ids": ["<REPLACE_restaurant_trunk_id>"],
+    "rule": {
+      "dispatchRuleIndividual": {
+        "roomPrefix": "restaurant-call-"
+      }
+    },
+    "roomConfig": {
+      "agents": [
+        {
+          "agentName": "receptionist",
+          "metadata": "{\"profile_id\":\"restaurant\"}"
+        }
+      ]
+    }
+  }
+}

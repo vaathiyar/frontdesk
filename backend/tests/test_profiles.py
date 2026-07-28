@@ -27,7 +27,6 @@ def test_factory_rejects_unknown_profile() -> None:
 def test_business_names_are_the_helpdesk_brand() -> None:
     assert _make("hvac").business_name == "Helpdesk Heating and Cooling"
     assert _make("restaurant").business_name == "Helpdesk Kitchen"
-    assert _make("auto").business_name == "Helpdesk Auto Services"
 
 
 def test_system_prompt_includes_business_and_fields() -> None:

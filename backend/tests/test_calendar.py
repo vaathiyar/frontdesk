@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 
 from receptionist.core.models import Booking
@@ -10,6 +12,15 @@ async def test_available_slots_excludes_seeded_busy() -> None:
     cal = FakeCalendarService()
     slots = await cal.available_slots("tomorrow")
     assert "8:00 AM" not in slots  # seeded busy
+    assert "10:00 AM" in slots
+
+
+async def test_seeded_busy_also_matches_tomorrows_iso_date() -> None:
+    # The agent sends absolute YYYY-MM-DD dates now, so the demo's "declines a taken slot"
+    # moment has to fire for tomorrow's ISO date, not just the literal "tomorrow".
+    cal = FakeCalendarService()
+    slots = await cal.available_slots((date.today() + timedelta(days=1)).isoformat())
+    assert "8:00 AM" not in slots
     assert "10:00 AM" in slots
 
 

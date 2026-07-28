@@ -13,10 +13,11 @@ class HvacReceptionist(Receptionist):
 
     def domain_prompt(self) -> str:
         return (
-            "You book service visits — furnace and AC repair, maintenance, and tune-ups. "
-            "The service area is Burnaby, New Westminster, and Coquitlam; if a caller is "
-            "outside it, take a message. There's a $119 service call fee, waived if the "
-            "repair proceeds; install quotes are free."
+            "You book service visits — furnace and AC repair, maintenance, and seasonal "
+            "tune-ups — for all makes and models. The service area is Burnaby, New "
+            "Westminster, and Coquitlam; if a caller is outside it, take a message. "
+            "Estimates on new furnace or AC installations are free, and annual "
+            "maintenance plans are available."
         )
 
     def booking_fields(self) -> list[Field]:
@@ -30,6 +31,7 @@ class HvacReceptionist(Receptionist):
     def knowledge(self) -> str:
         return (
             "Hours: Monday to Saturday, 8am to 6pm. Service area: Burnaby, "
-            "New Westminster, Coquitlam. Service call fee: $119, waived if the repair "
-            "proceeds. Install quotes are free."
+            "New Westminster, Coquitlam. We repair and maintain all makes and models of "
+            "furnaces and AC units, plus seasonal tune-ups. Estimates on new "
+            "installations are free, and annual maintenance plans are available."
         )

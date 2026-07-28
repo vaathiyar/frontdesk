@@ -4,17 +4,27 @@ version = "0.1.0"
 description = "AI receptionist PoC — one engine, swappable call profiles."
 requires-python = ">=3.11"
 dependencies = [
-    "anthropic>=0.40",
+    "google-api-python-client>=2.198.0",
+    "google-auth>=2.56.2",
+    "google-genai>=2.14.0",
+    "livekit-agents>=1.6.7",
+    "livekit-plugins-google>=1.6.7",
+    "livekit-plugins-silero>=1.6.7",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "python-dateutil>=2.9.0.post0",
+    "python-dotenv>=1.2.2",
 ]
 
-[project.optional-dependencies]
+# Dev tooling as a PEP 735 dependency group — installed by default on `uv sync`, and
+# excluded by the Docker build's `uv sync --no-dev` for a lean production image.
+[dependency-groups]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
     "mypy>=1.11",
+    "types-python-dateutil>=2.9.0.20260716",
 ]
 
 [build-system]
@@ -27,6 +37,12 @@ packages = ["src/receptionist"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# e2e tests hit the live Gemini API; keep them out of the default (offline) run.
+# Run them with: uv run pytest -m e2e -s
+addopts = ["-m", "not e2e"]
+markers = [
+    "e2e: end-to-end test that calls the real Gemini API (needs GOOGLE_API_KEY)",
+]
 
 [tool.ruff]
 line-length = 100
@@ -40,3 +56,16 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.11"
 strict = true
 files = ["src"]
+
+# LiveKit's agents/plugins ship py.typed, so mypy would otherwise follow them into their
+# heavy transitive deps (numpy, onnxruntime, ...) — and numpy 2.x's stubs use 3.12+ `type`
+# syntax mypy rejects under python_version = "3.11". Treat these vendor boundaries as opaque
+# (untyped) rather than type-checking through them.
+# googleapiclient (google-api-python-client) ships no stubs, and google-auth's
+# google.oauth2 is treated as an opaque vendor boundary too (both are imported lazily inside
+# GoogleCalendarService). dateutil, by contrast, gets real stubs from types-python-dateutil
+# (dev group) so the datetime resolver is fully type-checked.
+[[tool.mypy.overrides]]
+module = ["livekit.*", "google.cloud.*", "googleapiclient.*", "google.oauth2.*", "dotenv"]
+ignore_missing_imports = true
+follow_imports = "skip"

@@ -1,8 +1,8 @@
-"""A scripted stand-in for `AsyncAnthropic().messages`.
+"""A scripted stand-in for the chat provider (the runner's `MessagesAPI`).
 
 `FakeMessages` returns the next scripted response from an async `create(**kwargs)`;
 `text(...)` and `tool(...)` build those responses. The block objects duck-type the
-SDK's (`.type`, `.text`, `.name`, `.input`, `.id`) — enough for the runner.
+runner's expected shape (`.type`, `.text`, `.name`, `.input`, `.id`) — enough for it.
 """
 
 from __future__ import annotations

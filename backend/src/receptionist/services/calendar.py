@@ -9,8 +9,19 @@ availability check. A `GoogleCalendarService` will implement the same Protocol l
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Protocol
 from uuid import uuid4
+
+
+def _default_seed_busy() -> dict[str, set[str]]:
+    """Pre-booked blocks so a demo call visibly *declines* a taken slot.
+
+    Keyed by both the literal `"tomorrow"` and tomorrow's ISO date: the agent now sends
+    absolute YYYY-MM-DD dates, while the tests (and hand-typed input) still say "tomorrow".
+    Uses the system date — close enough for a dev fake; the real backend is timezone-aware.
+    """
+    return {"tomorrow": {"8:00 AM"}, (date.today() + timedelta(days=1)).isoformat(): {"8:00 AM"}}
 
 
 class SlotUnavailable(Exception):
@@ -24,7 +35,13 @@ class NoBooking(Exception):
 class CalendarService(Protocol):
     async def available_slots(self, day: str) -> list[str]: ...
     async def create_event(
-        self, caller_number: str, *, service: str, day: str, time: str
+        self,
+        caller_number: str,
+        *,
+        service: str,
+        day: str,
+        time: str,
+        attendee_email: str | None = None,
     ) -> str: ...
     async def find_event(self, caller_number: str) -> str | None: ...
     async def reschedule(self, caller_number: str, *, day: str, time: str) -> str: ...
@@ -49,7 +66,7 @@ class FakeCalendarService:
 
     slots: list[str] = field(default_factory=lambda: ["8:00 AM", "10:00 AM", "1:00 PM", "3:00 PM"])
     # day -> times that are already busy before any booking this session.
-    seed_busy: dict[str, set[str]] = field(default_factory=lambda: {"tomorrow": {"8:00 AM"}})
+    seed_busy: dict[str, set[str]] = field(default_factory=_default_seed_busy)
     _booked: dict[str, set[str]] = field(default_factory=dict)
     _held: dict[str, _Held] = field(default_factory=dict)
 
@@ -60,7 +77,17 @@ class FakeCalendarService:
         taken = self._taken(day)
         return [s for s in self.slots if s not in taken]
 
-    async def create_event(self, caller_number: str, *, service: str, day: str, time: str) -> str:
+    async def create_event(
+        self,
+        caller_number: str,
+        *,
+        service: str,
+        day: str,
+        time: str,
+        attendee_email: str | None = None,
+    ) -> str:
+        # `attendee_email` exists for parity with GoogleCalendarService (which emails the
+        # caller the invite); the in-memory fake has no one to notify, so it ignores it.
         if time not in await self.available_slots(day):
             raise SlotUnavailable(f"{time} on {day} is not available")
         self._booked.setdefault(day, set()).add(time)

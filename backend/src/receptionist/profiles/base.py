@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
+from datetime import date, datetime
 from typing import Any, ClassVar
+from zoneinfo import ZoneInfo
 
 from receptionist.core.models import Booking, CallRecord, CapturedField, Outcome
+from receptionist.core.settings import settings
 from receptionist.profiles.fields import Field
 from receptionist.services.calendar import CalendarService, NoBooking, SlotUnavailable
 
@@ -27,11 +30,51 @@ already know the caller's phone number from the call, so never ask for it. Alway
 an email (it's needed to send the calendar invite) and read it back, spelled out, to \
 confirm.
 
+Today is {today}. Whenever a tool takes a `day`, work out the actual calendar date \
+yourself and pass it as YYYY-MM-DD — never a phrase like "tomorrow" or "the day after \
+next". Speak dates back to the caller in words ("Wednesday the 29th"), never as digits.
+
 Call check_availability before offering a time, and only offer times it returns. Never \
 claim something is booked, moved, or cancelled unless the tool confirmed it — read the \
 tool's confirmation back. You can reschedule or cancel the caller's existing booking. \
 Use answer_question for questions about the business. If you can't help, or the caller \
 asks for a person, use take_message. Keep every reply short and spoken-friendly."""
+
+
+def _fmt_clock(when: datetime) -> str:
+    """`"2:05 PM"` — no leading zero, matching how the calendars format their slots."""
+    suffix = "AM" if when.hour < 12 else "PM"
+    return f"{when.hour % 12 or 12}:{when.minute:02d} {suffix}"
+
+
+def _describe_now(now: datetime | None = None) -> str:
+    """The prompt's date anchor. Without it the model has no idea what "today" is, so it
+    can't turn "the day after tomorrow" into a date — the whole reason we ask for ISO."""
+    tz = ZoneInfo(settings.timezone)
+    current = now or datetime.now(tz)
+    return (
+        f"{current:%A}, {current:%B} {current.day}, {current.year} "
+        f"at {_fmt_clock(current)} ({settings.timezone})"
+    )
+
+
+def _pretty_day(day: str) -> str:
+    """`"2026-07-29"` -> `"Wednesday, July 29"`, so nothing reads a date out as digits.
+
+    Anything that isn't an ISO date passes straight through — the fake calendar (and its
+    tests) still speak in "tomorrow" / "Tuesday".
+    """
+    try:
+        parsed = date.fromisoformat(day.strip())
+    except ValueError:
+        return day
+    return f"{parsed:%A}, {parsed:%B} {parsed.day}"
+
+
+def _pretty_slot(day: str, time: str) -> str:
+    """Human-readable slot for `Booking.slot` and for what the agent reads back."""
+    pretty = _pretty_day(day)
+    return f"{pretty} at {time}" if pretty != day else f"{day} {time}"
 
 
 class Receptionist(ABC):
@@ -57,7 +100,11 @@ class Receptionist(ABC):
     def system_prompt(self) -> str:
         fields = ", ".join(f.label for f in self.booking_fields())
         return BASE_PROMPT.format(
-            business=self.business_name, domain=self.domain_prompt(), fields=fields
+            business=self.business_name,
+            domain=self.domain_prompt(),
+            fields=fields,
+            # Resolved per call (and per turn) so a long-running worker never goes stale.
+            today=_describe_now(),
         )
 
     # --- Tool schemas the LLM sees (Anthropic tool definitions) ---
@@ -65,7 +112,13 @@ class Receptionist(ABC):
         def obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
             return {"type": "object", "properties": props, "required": required}
 
-        day = {"type": "string", "description": "day, e.g. 'tomorrow' or 'Tuesday'"}
+        # Absolute dates only: the model does the "day after tomorrow" arithmetic (it has
+        # today's date from the prompt), so no phrase-parsing is needed on our side.
+        day = {
+            "type": "string",
+            "description": "absolute calendar date as YYYY-MM-DD — work it out from what "
+            "the caller says, e.g. 'the day after tomorrow' or 'next Tuesday'",
+        }
         time = {"type": "string", "description": "time, e.g. '10:00 AM'"}
 
         booking_props: dict[str, Any] = {
@@ -135,16 +188,24 @@ class Receptionist(ABC):
         handler = handlers.get(name)
         if handler is None:
             return f"Unknown tool: {name}"
-        return await handler(args)
+        try:
+            return await handler(args)
+        except ValueError as exc:
+            # A tool rejected its input (e.g. a day/time it couldn't parse). Hand the reason
+            # back as a tool *result* so the model can ask the caller to clarify and retry.
+            # Letting it escape would abort the turn — on a real call, that's dead air.
+            self.record.emit("tool_input_rejected", f"{name}: {exc}")
+            return f"That didn't work: {exc} Ask the caller to clarify, then try again."
 
     # --- Tools (the safety boundary) ---
     async def _tool_check_availability(self, args: dict[str, Any]) -> str:
         day = str(args.get("day", ""))
         slots = await self.calendar.available_slots(day)
-        self.record.emit("availability_checked", f"{day}: {', '.join(slots) or 'none'}")
+        spoken = _pretty_day(day)
+        self.record.emit("availability_checked", f"{spoken}: {', '.join(slots) or 'none'}")
         if not slots:
-            return f"No times are open on {day}."
-        return f"Open times on {day}: {', '.join(slots)}."
+            return f"No times are open on {spoken}."
+        return f"Open times on {spoken}: {', '.join(slots)}."
 
     async def _tool_book(self, args: dict[str, Any]) -> str:
         service = str(args.get("service", ""))
@@ -157,16 +218,25 @@ class Receptionist(ABC):
         ]
         try:
             event_id = await self.calendar.create_event(
-                self.record.caller_number, service=service, day=day, time=time
+                self.record.caller_number,
+                service=service,
+                day=day,
+                time=time,
+                # Passed through so GoogleCalendarService can email the caller the invite;
+                # the fake ignores it. Empty/missing email -> None (no attendee).
+                attendee_email=str(args.get("email", "")) or None,
             )
         except SlotUnavailable:
             open_ = await self.calendar.available_slots(day)
-            self.record.emit("slot_declined", f"{time} on {day} was taken")
+            spoken = _pretty_day(day)
+            self.record.emit("slot_declined", f"{time} on {spoken} was not available")
+            # "not available" rather than "already taken": the time may simply be outside
+            # the bookable grid, and claiming someone booked it would be a made-up fact.
             return (
-                f"{time} on {day} is already taken. "
-                f"Open times on {day}: {', '.join(open_) or 'none'}."
+                f"{time} on {spoken} isn't available. "
+                f"Open times on {spoken}: {', '.join(open_) or 'none'}."
             )
-        slot = f"{day} {time}"
+        slot = _pretty_slot(day, time)
         self.record.booking = Booking(
             service=service, slot=slot, calendar_event_id=event_id, fields=fields
         )
@@ -183,9 +253,10 @@ class Receptionist(ABC):
             return "I don't see a booking under this number to move."
         except SlotUnavailable:
             open_ = await self.calendar.available_slots(day)
-            return f"{time} on {day} is taken. Open times: {', '.join(open_) or 'none'}."
+            spoken = _pretty_day(day)
+            return f"{time} on {spoken} is taken. Open times: {', '.join(open_) or 'none'}."
         if self.record.booking is not None:
-            self.record.booking.slot = f"{day} {time}"
+            self.record.booking.slot = _pretty_slot(day, time)
         self.record.outcome = Outcome.RESCHEDULED
         self.record.emit("booking_rescheduled", desc)
         return f"Moved to {desc}."

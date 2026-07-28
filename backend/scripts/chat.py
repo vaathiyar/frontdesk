@@ -2,12 +2,15 @@
 
     uv run python scripts/chat.py hvac
 
-Type as the caller; watch the agent book/answer/take a message against a seeded
-fake calendar. On exit it prints the resulting CallRecord: outcome, captured
-fields, the code-emitted decision timeline, and the signed share link. This is
-the fastest way to iterate on prompts and tools before wiring the voice stack.
+Type as the caller; watch the agent book/answer/take a message. Bookings hit a real
+Google Calendar when the profile has an id in RECEPTIONIST_CALENDAR_IDS; otherwise a
+seeded in-memory fake is used. On exit it prints the resulting CallRecord: outcome,
+captured fields, the code-emitted decision timeline, and the signed share link — the
+fastest way to iterate on prompts and tools before wiring the voice stack.
 
-Needs an LLM credential (ANTHROPIC_API_KEY, or `ant auth login`).
+Needs GOOGLE_API_KEY (Gemini). Real calendar bookings also need
+GOOGLE_CREDENTIALS_FILE_PATH (a service account with the Calendar API enabled) and
+RECEPTIONIST_CALENDAR_IDS. See docs/config.md.
 """
 
 from __future__ import annotations
@@ -18,7 +21,21 @@ import asyncio
 from receptionist.agent.runner import ConversationRunner
 from receptionist.core.models import CallRecord, TranscriptTurn
 from receptionist.profiles.factory import PROFILES, UnknownProfile, create_profile
-from receptionist.services.calendar import FakeCalendarService
+from receptionist.providers.factory import build_calendar, build_chat
+
+_AUTH_ERROR_TOKENS = (
+    "api key",
+    "api_key",
+    "credential",
+    "unauthenticated",
+    "permission denied",
+    "401",
+    "403",
+)
+
+
+def _looks_like_auth_error(exc: Exception) -> bool:
+    return any(token in str(exc).lower() for token in _AUTH_ERROR_TOKENS)
 
 
 def _print_summary(record: CallRecord) -> None:
@@ -41,7 +58,15 @@ def _print_summary(record: CallRecord) -> None:
 
 async def _repl(profile_id: str, caller_number: str) -> None:
     record = CallRecord(profile_id=profile_id, caller_number=caller_number)
-    calendar = FakeCalendarService()
+    try:
+        # Real Google Calendar when this profile has an id in RECEPTIONIST_CALENDAR_IDS;
+        # otherwise the in-memory fake — so this runs with or without calendar config.
+        calendar = build_calendar(profile_id)
+    except Exception as exc:  # e.g. missing/invalid service-account creds for a real calendar
+        print(f"\n[error] couldn't initialize the calendar: {exc}")
+        print("[hint] check GOOGLE_CREDENTIALS_FILE_PATH and RECEPTIONIST_CALENDAR_IDS")
+        print("       (or unset RECEPTIONIST_CALENDAR_IDS to use the in-memory fake).")
+        return
     try:
         agent = create_profile(profile_id, calendar, record)
     except UnknownProfile:
@@ -49,13 +74,13 @@ async def _repl(profile_id: str, caller_number: str) -> None:
         return
 
     try:
-        from anthropic import AsyncAnthropic
-    except ModuleNotFoundError:
-        print("The `anthropic` package isn't installed. Run: uv sync --extra dev")
+        messages_api = build_chat()  # names the vendor once; reads GOOGLE_API_KEY via settings
+    except Exception as exc:  # most likely: no GOOGLE_API_KEY configured
+        print(f"\n[error] couldn't initialize the chat model: {exc}")
+        print("[hint] set GOOGLE_API_KEY (or add it to .env), then retry.")
         return
 
-    client = AsyncAnthropic()  # resolves ANTHROPIC_API_KEY or an `ant auth login` profile
-    runner = ConversationRunner(agent, client.messages)
+    runner = ConversationRunner(agent, messages_api)
 
     print(f"\n  {agent.business_name}   (profile: {profile_id})")
     print("  Type as the caller. Ctrl-D or 'quit' to end the call.\n")
@@ -74,9 +99,12 @@ async def _repl(profile_id: str, caller_number: str) -> None:
             continue
         try:
             reply = await runner.send(caller)
-        except Exception as exc:  # most likely: missing/invalid credential
+        except Exception as exc:
             print(f"\n[error] {type(exc).__name__}: {exc}")
-            print("[hint] set ANTHROPIC_API_KEY or run `ant auth login`, then retry.")
+            # Only guess at credentials when the error actually looks like one — a blanket
+            # "set GOOGLE_API_KEY" hint just sends you chasing the wrong thing.
+            if _looks_like_auth_error(exc):
+                print("[hint] check GOOGLE_API_KEY / GOOGLE_CREDENTIALS_FILE_PATH in .env.")
             return
         print(f"agent> {reply}")
 
@@ -85,7 +113,7 @@ async def _repl(profile_id: str, caller_number: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", nargs="?", default="hvac", help="hvac | restaurant | auto")
+    parser.add_argument("profile", nargs="?", default="hvac", help="hvac | restaurant")
     parser.add_argument("--caller", default="+1-555-0100", help="caller ID to simulate")
     args = parser.parse_args()
     asyncio.run(_repl(args.profile, args.caller))

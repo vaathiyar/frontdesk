@@ -7,7 +7,6 @@ the class by its string key, then call it to build an instance. No factory class
 from __future__ import annotations
 
 from receptionist.core.models import CallRecord
-from receptionist.profiles.auto import AutoReceptionist
 from receptionist.profiles.base import Receptionist
 from receptionist.profiles.hvac import HvacReceptionist
 from receptionist.profiles.restaurant import RestaurantReceptionist
@@ -21,7 +20,6 @@ class UnknownProfile(KeyError):
 PROFILES: dict[str, type[Receptionist]] = {
     "hvac": HvacReceptionist,
     "restaurant": RestaurantReceptionist,
-    "auto": AutoReceptionist,
 }
 
 
