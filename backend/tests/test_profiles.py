@@ -1,72 +1,97 @@
+"""The extension surface: every profile must be usable by the graph without special-casing."""
+
 from __future__ import annotations
 
 import pytest
 
-from receptionist.core.models import CallRecord
-from receptionist.profiles.factory import PROFILES, UnknownProfile, create_profile
-from receptionist.services.calendar import FakeCalendarService
+from receptionist.graph import build_graph
+from receptionist.profiles import PROFILES, UnknownProfile, get_profile
+from receptionist.prompt import render
+from receptionist.tools import SHARED_TOOLS
+from tests.fakes import ScriptedModel
+
+PROFILE_IDS = list(PROFILES)
 
 
-def _make(profile_id: str):
-    record = CallRecord(profile_id=profile_id, caller_number="+1-555-0100")
-    return create_profile(profile_id, FakeCalendarService(), record)
+def test_registry_is_keyed_by_the_profiles_own_id() -> None:
+    assert all(key == profile.id for key, profile in PROFILES.items())
 
 
-def test_factory_creates_every_registered_profile() -> None:
-    for pid in PROFILES:
-        agent = _make(pid)
-        assert agent.profile_id == pid
-        assert agent.business_name  # set by the subclass
-
-
-def test_factory_rejects_unknown_profile() -> None:
+def test_unknown_profile_fails_fast() -> None:
     with pytest.raises(UnknownProfile):
-        _make("dental")
+        get_profile("dental")
 
 
-def test_business_names_are_the_helpdesk_brand() -> None:
-    assert _make("hvac").business_name == "Helpdesk Heating and Cooling"
-    assert _make("restaurant").business_name == "Helpdesk Kitchen"
+@pytest.mark.parametrize("profile_id", PROFILE_IDS)
+def test_every_profile_builds_a_graph(profile_id: str) -> None:
+    build_graph(get_profile(profile_id), ScriptedModel())
 
 
-def test_system_prompt_includes_business_and_fields() -> None:
-    agent = _make("hvac")
-    prompt = agent.system_prompt()
-    assert agent.business_name in prompt
-    for f in agent.booking_fields():
-        assert f.label in prompt
+@pytest.mark.parametrize("profile_id", PROFILE_IDS)
+def test_prompt_carries_the_business_its_work_and_its_facts(profile_id: str) -> None:
+    profile = get_profile(profile_id)
+    prompt = render(profile)
+
+    assert profile.business in prompt
+    assert profile.does in prompt
+    assert profile.knowledge in prompt
 
 
-def test_every_profile_exposes_the_six_tools() -> None:
-    expected = {
-        "check_availability",
-        "book",
-        "reschedule",
-        "cancel",
-        "answer_question",
-        "take_message",
-    }
-    for pid in PROFILES:
-        names = {t["name"] for t in _make(pid).tool_schemas()}
-        assert names == expected
+@pytest.mark.parametrize("profile_id", PROFILE_IDS)
+def test_prompt_anchors_today_and_demands_iso_dates(profile_id: str) -> None:
+    prompt = render(get_profile(profile_id))
+
+    assert "Today is" in prompt
+    assert "YYYY-MM-DD" in prompt
 
 
-def test_book_schema_requires_service_time_and_every_booking_field() -> None:
-    agent = _make("hvac")
-    book = next(t for t in agent.tool_schemas() if t["name"] == "book")
-    required = set(book["input_schema"]["required"])
-    assert {"service", "day", "time"} <= required
-    for f in agent.booking_fields():
-        assert f.key in required
+@pytest.mark.parametrize("profile_id", PROFILE_IDS)
+def test_prompt_never_asks_for_contact_details_we_already_have_or_dont_need(
+    profile_id: str,
+) -> None:
+    prompt = render(get_profile(profile_id))
+
+    assert "never ask for it" in prompt  # phone number: it comes from the call
+    assert "Never ask for an email" in prompt
+    assert "Never ask permission to text" in prompt
 
 
-def test_email_is_a_required_booking_field_everywhere() -> None:
-    for pid in PROFILES:
-        keys = {f.key for f in _make(pid).booking_fields()}
-        assert "email" in keys
-        assert "phone" not in keys  # phone comes from caller ID, never collected
+@pytest.mark.parametrize("profile_id", PROFILE_IDS)
+def test_book_always_takes_a_service_a_day_and_a_time(profile_id: str) -> None:
+    schema = get_profile(profile_id).book.tool_call_schema.model_json_schema()
+
+    assert {"service", "day", "time"} <= set(schema["properties"])
+    # Every field is required: a partial call must fail the schema, not book a half-booking.
+    assert set(schema["required"]) == set(schema["properties"])
 
 
-def test_restaurant_loads_its_own_menu() -> None:
-    knowledge = _make("restaurant").knowledge()
-    assert "Margherita Pizza" in knowledge
+@pytest.mark.parametrize("profile_id", PROFILE_IDS)
+def test_book_collects_a_name_and_describes_every_field_to_the_model(profile_id: str) -> None:
+    properties = get_profile(profile_id).book.tool_call_schema.model_json_schema()["properties"]
+
+    assert "name" in properties
+    undocumented = [key for key, spec in properties.items() if not spec.get("description")]
+    # `parse_docstring=True` silently skips params missing from the Args: block, so an
+    # undocumented field would reach the model with no guidance at all.
+    assert undocumented == []
+
+
+@pytest.mark.parametrize("profile_id", PROFILE_IDS)
+def test_the_per_call_runtime_is_never_exposed_to_the_model(profile_id: str) -> None:
+    profile = get_profile(profile_id)
+    for tool in [*SHARED_TOOLS, profile.book, *profile.extra_tools]:
+        assert "runtime" not in tool.tool_call_schema.model_json_schema().get("properties", {})
+
+
+def test_hvac_collects_where_to_send_the_technician() -> None:
+    properties = get_profile("hvac").book.tool_call_schema.model_json_schema()["properties"]
+    assert "address" in properties
+
+
+def test_restaurant_collects_the_party_size_and_loads_its_own_menu() -> None:
+    restaurant = get_profile("restaurant")
+    properties = restaurant.book.tool_call_schema.model_json_schema()["properties"]
+
+    assert "party_size" in properties
+    assert "address" not in properties
+    assert "Tiramisu" in restaurant.knowledge

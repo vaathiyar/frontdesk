@@ -1,9 +1,8 @@
-"""The shared end-result contract.
+"""What one call produces.
 
-`CallRecord` is produced by the agent and read by the store, the email, and the
-web view — one type, so those three never drift. This module is the spine both
-the agent and the (later) web backend import; it depends on nothing else internal
-except `links`.
+`CallRecord` is the single end-result: the agent's tools write to it, the store
+persists it, the confirmation SMS summarises it, and the web page renders it. One
+type, so those four never drift.
 """
 
 from __future__ import annotations
@@ -34,47 +33,43 @@ class TranscriptTurn(BaseModel):
     text: str
 
 
-class CapturedField(BaseModel):
-    key: str
-    label: str
-    value: str
-    confirmed: bool = False
-
-
 class CallEvent(BaseModel):
-    """One row on the decision timeline — emitted by code, not narrated by the LLM."""
+    """One row on the decision timeline. Emitted by code, never narrated by the model —
+    that's what makes it trustworthy evidence of what actually happened."""
 
     ts: datetime = Field(default_factory=_now)
-    type: str  # e.g. "booking_created", "slot_declined", "question_answered"
+    type: str  # e.g. "booking_created", "slot_declined"
     summary: str
 
 
 class Booking(BaseModel):
     service: str
-    slot: str  # human-readable, e.g. "Tuesday 10:00 AM"
+    starts_at: datetime
+    ends_at: datetime
     calendar_event_id: str | None = None
-    fields: list[CapturedField] = Field(default_factory=list)
+    # Whatever this profile collects: {"name": ..., "address": ..., "issue": ...}
+    details: dict[str, str] = Field(default_factory=dict)
+
+
+class Message(BaseModel):
+    name: str
+    reason: str
 
 
 class CallRecord(BaseModel):
-    """THE end-result — single source of truth for one call."""
-
     id: UUID = Field(default_factory=uuid4)
     profile_id: str
     caller_number: str  # from the call itself (SIP caller ID); never asked for
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
     outcome: Outcome | None = None
-    fields: list[CapturedField] = Field(default_factory=list)
     booking: Booking | None = None
+    message: Message | None = None
     transcript: list[TranscriptTurn] = Field(default_factory=list)
     events: list[CallEvent] = Field(default_factory=list)
-    recording_url: str | None = None
 
     def emit(self, type: str, summary: str) -> None:
         self.events.append(CallEvent(type=type, summary=summary))
 
-    def share_path(self) -> str:
-        from receptionist.core.links import sign
-
-        return f"/c/{self.id}?t={sign(self.id)}"
+    def said(self, role: str, text: str) -> None:
+        self.transcript.append(TranscriptTurn(role=role, text=text))

@@ -1,54 +1,81 @@
-"""A scripted stand-in for the chat provider (the runner's `MessagesAPI`).
+"""A chat model you can script, so the graph runs with no network and no API key.
 
-`FakeMessages` returns the next scripted response from an async `create(**kwargs)`;
-`text(...)` and `tool(...)` build those responses. The block objects duck-type the
-runner's expected shape (`.type`, `.text`, `.name`, `.input`, `.id`) — enough for it.
+`ScriptedModel` replays the `AIMessage`s you hand it, in order. Build them with
+`says(...)` for a spoken reply and `calls(...)` for a tool call — that's enough to
+drive any path through the graph deterministically.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from pydantic import PrivateAttr
 
-@dataclass
-class TextBlock:
-    text: str
-    type: str = "text"
+from receptionist.services.when import timezone
 
-
-@dataclass
-class ToolUseBlock:
-    name: str
-    input: dict[str, Any]
-    id: str = "tool_1"
-    type: str = "tool_use"
+CALLER = "+16045550100"
 
 
-@dataclass
-class FakeResponse:
-    content: list[Any]
-    stop_reason: str
+def day_after(days: int) -> str:
+    """An ISO date relative to today in the business timezone — the form tools expect."""
+    return (datetime.now(timezone()) + timedelta(days=days)).date().isoformat()
 
 
-def text(s: str, /) -> FakeResponse:
-    return FakeResponse([TextBlock(s)], "end_turn")
+def says(text: str) -> AIMessage:
+    return AIMessage(content=text)
 
 
-def tool(name: str, /, *, tool_id: str = "tool_1", **inp: Any) -> FakeResponse:
-    # `name` is positional-only so a tool argument literally called "name"
-    # (e.g. the caller's name on a booking) lands in **inp, not here.
-    return FakeResponse([ToolUseBlock(name=name, input=inp, id=tool_id)], "tool_use")
+def calls(tool: str, /, **args: Any) -> AIMessage:
+    """An AIMessage asking for one tool call. `tool` is positional-only so it can't
+    collide with a tool argument of its own called `tool`."""
+    return AIMessage(content="", tool_calls=[{"name": tool, "args": args, "id": f"call_{tool}"}])
 
 
-@dataclass
-class FakeMessages:
-    script: list[FakeResponse]
-    calls: list[dict[str, Any]] = field(default_factory=list)
-    _i: int = 0
+class ScriptedModel(BaseChatModel):
+    """Replays `replies` in order. Once exhausted it says a neutral closing line, so a
+    test that under-scripts fails on an assertion rather than hanging.
 
-    async def create(self, **kwargs: Any) -> FakeResponse:
-        self.calls.append(kwargs)
-        response = self.script[self._i]
-        self._i += 1
-        return response
+    Set `loop=True` to repeat the script forever — used to prove the recursion cap.
+    """
+
+    replies: list[AIMessage] = []
+    loop: bool = False
+    prompts: list[list[BaseMessage]] = []
+
+    _sent: int = PrivateAttr(default=0)
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> BaseChatModel:
+        # The script decides what gets called; the real schemas are asserted elsewhere.
+        return self
+
+    def _next_reply(self) -> AIMessage:
+        if self._sent < len(self.replies):
+            return self.replies[self._sent]
+        if self.loop and self.replies:
+            return self.replies[self._sent % len(self.replies)]
+        return says("Anything else I can help with?")
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self.prompts.append(list(messages))
+        reply = self._next_reply()
+        self._sent += 1
+        # A fresh id each time: `add_messages` merges by id, so replaying one message
+        # object would overwrite the earlier copy instead of appending a new turn.
+        return ChatResult(
+            generations=[ChatGeneration(message=reply.model_copy(update={"id": None}))]
+        )

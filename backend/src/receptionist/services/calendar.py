@@ -1,120 +1,158 @@
-"""Calendar integration behind an interface, plus a seeded in-memory fake.
+"""Booking, behind an interface, plus the in-memory fake the REPL and tests run on.
 
-The fake is what the dev harness and tests run against — no network, deterministic,
-and it *enforces* the "never book a busy slot" guarantee in code (`create_event`
-refuses an unavailable time), so the guarantee holds even if the model skips the
-availability check. A `GoogleCalendarService` will implement the same Protocol later.
+The fake enforces the guarantee in code: `create_event` refuses a time that isn't
+open, so the agent cannot book over an existing appointment even if the model skips
+checking availability first. Both backends work off the same hours grid below, so
+what you see in the REPL is what a real calendar would offer.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
-from typing import Protocol
+from datetime import date, datetime, time, timedelta
+from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
+from receptionist.services.when import fmt_time, resolve_datetime, spoken, timezone
 
-def _default_seed_busy() -> dict[str, set[str]]:
-    """Pre-booked blocks so a demo call visibly *declines* a taken slot.
-
-    Keyed by both the literal `"tomorrow"` and tomorrow's ISO date: the agent now sends
-    absolute YYYY-MM-DD dates, while the tests (and hand-typed input) still say "tomorrow".
-    Uses the system date — close enough for a dev fake; the real backend is timezone-aware.
-    """
-    return {"tomorrow": {"8:00 AM"}, (date.today() + timedelta(days=1)).isoformat(): {"8:00 AM"}}
+# Business hours. Appointments start on the grid and must end by closing.
+OPEN_HOUR = 8
+CLOSE_HOUR = 18
+SLOT_MINUTES = 60
+APPOINTMENT_MINUTES = 60
 
 
 class SlotUnavailable(Exception):
-    """Raised when a requested time is already taken."""
+    """The requested time is taken, or outside bookable hours."""
 
 
 class NoBooking(Exception):
-    """Raised when a reschedule/cancel is attempted with nothing on the books."""
+    """Nothing on the books for this caller to move or cancel."""
 
 
+@dataclass(frozen=True)
+class Booked:
+    """A confirmed appointment — the only thing that proves a booking happened."""
+
+    event_id: str
+    service: str
+    starts_at: datetime
+    ends_at: datetime
+
+    def spoken(self) -> str:
+        return f"{self.service} on {spoken(self.starts_at)}"
+
+
+# runtime_checkable because the tools carry a CalendarService inside `CallContext`, and
+# LangChain builds a pydantic schema for the tool signature that isinstance-checks it.
+@runtime_checkable
 class CalendarService(Protocol):
     async def available_slots(self, day: str) -> list[str]: ...
     async def create_event(
-        self,
-        caller_number: str,
-        *,
-        service: str,
-        day: str,
-        time: str,
-        attendee_email: str | None = None,
-    ) -> str: ...
-    async def find_event(self, caller_number: str) -> str | None: ...
-    async def reschedule(self, caller_number: str, *, day: str, time: str) -> str: ...
+        self, caller_number: str, *, service: str, day: str, time: str
+    ) -> Booked: ...
+    async def reschedule(self, caller_number: str, *, day: str, time: str) -> Booked: ...
     async def cancel(self, caller_number: str) -> str: ...
 
 
-@dataclass
-class _Held:
-    service: str
-    day: str
-    time: str
-    event_id: str
+def slot_grid(on: date) -> list[datetime]:
+    """Candidate start times on `on` whose appointment still ends by closing."""
+    tz = timezone()
+    opens = datetime.combine(on, time(OPEN_HOUR), tzinfo=tz)
+    closes = datetime.combine(on, time(CLOSE_HOUR), tzinfo=tz)
+    starts, cursor = [], opens
+    while cursor + timedelta(minutes=APPOINTMENT_MINUTES) <= closes:
+        starts.append(cursor)
+        cursor += timedelta(minutes=SLOT_MINUTES)
+    return starts
 
 
 @dataclass
 class FakeCalendarService:
-    """In-memory calendar. One active booking per caller (keyed by caller number).
+    """In-memory calendar, one active appointment per caller number.
 
-    Seed a couple of busy blocks so the demo shows the agent *declining* a taken
-    slot — the most convincing thing to show a prospect.
+    Seeds tomorrow at 8:00 AM as busy so a demo call visibly declines a taken time —
+    the most convincing thing to show a prospect.
     """
 
-    slots: list[str] = field(default_factory=lambda: ["8:00 AM", "10:00 AM", "1:00 PM", "3:00 PM"])
-    # day -> times that are already busy before any booking this session.
-    seed_busy: dict[str, set[str]] = field(default_factory=_default_seed_busy)
-    _booked: dict[str, set[str]] = field(default_factory=dict)
-    _held: dict[str, _Held] = field(default_factory=dict)
+    busy: dict[str, set[str]] = field(default_factory=dict)
+    _held: dict[str, Booked] = field(default_factory=dict)
 
-    def _taken(self, day: str) -> set[str]:
-        return self._booked.get(day, set()) | self.seed_busy.get(day, set())
+    def __post_init__(self) -> None:
+        if not self.busy:
+            tomorrow = (datetime.now(timezone()) + timedelta(days=1)).date()
+            self.busy = {tomorrow.isoformat(): {"8:00 AM"}}
 
     async def available_slots(self, day: str) -> list[str]:
-        taken = self._taken(day)
-        return [s for s in self.slots if s not in taken]
+        from receptionist.services.when import resolve_date
+
+        now = datetime.now(timezone())
+        on = resolve_date(day, now.date())
+        taken = self.busy.get(on.isoformat(), set())
+        # `s > now` drops times already past, matching what a real calendar would offer.
+        return [fmt_time(s) for s in slot_grid(on) if s > now and fmt_time(s) not in taken]
 
     async def create_event(
-        self,
-        caller_number: str,
-        *,
-        service: str,
-        day: str,
-        time: str,
-        attendee_email: str | None = None,
-    ) -> str:
-        # `attendee_email` exists for parity with GoogleCalendarService (which emails the
-        # caller the invite); the in-memory fake has no one to notify, so it ignores it.
+        self, caller_number: str, *, service: str, day: str, time: str
+    ) -> Booked:
         if time not in await self.available_slots(day):
             raise SlotUnavailable(f"{time} on {day} is not available")
-        self._booked.setdefault(day, set()).add(time)
-        event_id = f"evt_{uuid4().hex[:8]}"
-        self._held[caller_number] = _Held(service, day, time, event_id)
-        return event_id
+        starts_at = resolve_datetime(day, time, tz=timezone())
+        booked = Booked(
+            event_id=f"evt_{uuid4().hex[:8]}",
+            service=service,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(minutes=APPOINTMENT_MINUTES),
+        )
+        self._mark_busy(booked)
+        self._held[caller_number] = booked
+        return booked
 
-    async def find_event(self, caller_number: str) -> str | None:
-        held = self._held.get(caller_number)
-        if held is None:
-            return None
-        return f"{held.service} on {held.day} at {held.time}"
-
-    async def reschedule(self, caller_number: str, *, day: str, time: str) -> str:
+    async def reschedule(self, caller_number: str, *, day: str, time: str) -> Booked:
         held = self._held.get(caller_number)
         if held is None:
             raise NoBooking("no existing booking for this caller")
         if time not in await self.available_slots(day):
             raise SlotUnavailable(f"{time} on {day} is not available")
-        self._booked.get(held.day, set()).discard(held.time)
-        self._booked.setdefault(day, set()).add(time)
-        held.day, held.time = day, time
-        return f"{held.service} on {day} at {time}"
+        self._free(held)
+        starts_at = resolve_datetime(day, time, tz=timezone())
+        moved = Booked(
+            event_id=held.event_id,
+            service=held.service,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(minutes=APPOINTMENT_MINUTES),
+        )
+        self._mark_busy(moved)
+        self._held[caller_number] = moved
+        return moved
 
     async def cancel(self, caller_number: str) -> str:
         held = self._held.pop(caller_number, None)
         if held is None:
             raise NoBooking("no existing booking for this caller")
-        self._booked.get(held.day, set()).discard(held.time)
-        return f"{held.service} on {held.day} at {held.time}"
+        self._free(held)
+        return held.spoken()
+
+    def _mark_busy(self, booked: Booked) -> None:
+        key = booked.starts_at.date().isoformat()
+        self.busy.setdefault(key, set()).add(fmt_time(booked.starts_at))
+
+    def _free(self, booked: Booked) -> None:
+        key = booked.starts_at.date().isoformat()
+        self.busy.get(key, set()).discard(fmt_time(booked.starts_at))
+
+
+def build_calendar(profile_id: str) -> CalendarService:
+    """The real Google Calendar when this profile has one configured, else the fake.
+
+    The Google import stays lazy so the offline path never loads googleapiclient.
+    """
+    from receptionist.settings import settings
+
+    calendar_id = settings.calendar_ids.get(profile_id)
+    if not calendar_id:
+        return FakeCalendarService()
+
+    from receptionist.services.google_calendar import GoogleCalendarService
+
+    return GoogleCalendarService(calendar_id)

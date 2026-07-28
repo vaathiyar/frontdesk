@@ -1,37 +1,61 @@
-"""Restaurant — reservations. Owns its own config file (the menu)."""
+"""Restaurant — reservations. Owns its own data file, the menu."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from receptionist.core.models import CallRecord
-from receptionist.profiles.base import Receptionist
-from receptionist.profiles.fields import EMAIL, NAME, Field
-from receptionist.services.calendar import CalendarService
+from langchain_core.tools import tool
+from langgraph.prebuilt.tool_node import ToolRuntime
 
-_MENU_PATH = Path(__file__).parent / "data" / "restaurant_menu.json"
+from receptionist.profiles.profile import Profile
+from receptionist.tools import CallContext, save_booking
+
+_MENU_PATH = Path(__file__).parent / "restaurant_menu.json"
 
 
-class RestaurantReceptionist(Receptionist):
-    profile_id = "restaurant"
-    business_name = "Helpdesk Kitchen"
-    greeting = "Thanks for calling Helpdesk Kitchen!"
+def _menu() -> str:
+    items = json.loads(_MENU_PATH.read_text())["items"]
+    return "; ".join(f"{item['name']} (${item['price']})" for item in items)
 
-    def __init__(self, calendar: CalendarService, record: CallRecord) -> None:
-        super().__init__(calendar, record)
-        self._menu = json.loads(_MENU_PATH.read_text())
 
-    def domain_prompt(self) -> str:
-        return (
-            "You take table reservations. Treat the 'service' as the table (e.g. "
-            "'table for 4'). For parties larger than 8, offer to take a message for the "
-            "manager instead of booking."
-        )
+@tool(parse_docstring=True)
+async def book(
+    service: str,
+    day: str,
+    time: str,
+    name: str,
+    party_size: str,
+    runtime: ToolRuntime[CallContext],
+) -> str:
+    """Book a table. Call this only once you have every detail below and a time you have
+    confirmed is open.
 
-    def booking_fields(self) -> list[Field]:
-        return [NAME, Field("party_size", "party size"), EMAIL]
+    Args:
+        service: The reservation, e.g. "table for 4".
+        day: The reservation day, as an absolute calendar date in YYYY-MM-DD form.
+        time: The reservation time, e.g. "7:00 PM".
+        name: The name to hold the table under.
+        party_size: How many people are coming.
+    """
+    return await save_booking(
+        runtime,
+        service=service,
+        day=day,
+        time=time,
+        details={"name": name, "party_size": party_size},
+    )
 
-    def knowledge(self) -> str:
-        items = "; ".join(f"{i['name']} (${i['price']})" for i in self._menu["items"])
-        return f"Hours: Tuesday to Sunday, 5pm to 10pm. Menu: {items}."
+
+RESTAURANT = Profile(
+    id="restaurant",
+    business="Helpdesk Kitchen",
+    greeting="Thanks for calling Helpdesk Kitchen!",
+    does=(
+        "You take table reservations. Treat the reservation as the table itself, e.g. "
+        "'table for 4'. For parties larger than 8, take a message for the manager "
+        "instead of booking."
+    ),
+    knowledge=f"Hours are Tuesday to Sunday, 5pm to 10pm. On the menu: {_menu()}.",
+    book=book,
+)
