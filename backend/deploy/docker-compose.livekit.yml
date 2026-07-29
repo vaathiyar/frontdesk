@@ -1,0 +1,23 @@
+# A throwaway local LiveKit server, so `agent.py dev` has something to register with.
+# LOCAL DEVELOPMENT ONLY. Single node, so no Redis — that is only needed to run several
+# LiveKit instances as a cluster.
+#
+#   cd backend
+#   docker compose -f deploy/docker-compose.livekit.yml up -d
+#   docker compose -f deploy/docker-compose.livekit.yml logs -f
+#   docker compose -f deploy/docker-compose.livekit.yml down
+#
+# Then point the worker at it:
+#
+#   LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=apk LIVEKIT_API_SECRET=123 \
+#     uv run agent.py dev
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: ["--config", "/etc/livekit.yaml"]
+    # Host networking: WebRTC needs its UDP media ports reachable, and publishing a whole
+    # range through the bridge is both slow to start and unreliable.
+    network_mode: host
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    restart: unless-stopped

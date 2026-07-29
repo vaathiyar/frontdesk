@@ -1,0 +1,15 @@
+# LOCAL DEVELOPMENT ONLY — do not deploy this.
+# The key/secret pair below is deliberately trivial so it can live in the repo; anything
+# reachable from the internet needs a real secret (32+ chars) supplied out of band.
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  # The server and everything talking to it are on this machine, so there is no external
+  # address to discover.
+  use_external_ip: false
+keys:
+  apk: "123"
+logging:
+  level: info
