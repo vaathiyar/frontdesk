@@ -4,13 +4,17 @@ Model and voice choices are code constants, not settings: they are wired to what
 rest of the pipeline expects, and a wrong value here is a broken call rather than a
 tuning preference. Only the credentials come from the environment.
 
-Imports are local to each builder so that importing this module — which the tests do
-transitively — never drags in onnxruntime and the rest of the audio stack.
+The plugin imports are at module scope on purpose. LiveKit plugins register themselves
+when imported, and registration has to happen on the main thread — deferring these into
+the builders looks tidier but crashes every call with "Plugins must be registered on the
+main thread", because the job entrypoint does not run there.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from livekit.plugins import google, silero
 
 from receptionist.settings import settings
 
@@ -25,8 +29,6 @@ TTS_VOICE = "en-US-Chirp3-HD-Charon"
 
 
 def build_stt() -> Any:
-    from livekit.plugins import google
-
     return google.STT(
         model=STT_MODEL,
         languages=STT_LANGUAGES,
@@ -37,8 +39,6 @@ def build_stt() -> Any:
 
 
 def build_tts() -> Any:
-    from livekit.plugins import google
-
     return google.TTS(
         voice_name=TTS_VOICE,
         model_name=TTS_MODEL,
@@ -46,8 +46,10 @@ def build_tts() -> Any:
     )
 
 
-def build_vad() -> Any:
-    """Silero voice-activity detection. Weights ship inside the plugin wheel."""
-    from livekit.plugins import silero
+def load_vad() -> Any:
+    """Silero voice-activity detection. Weights ship inside the plugin wheel.
 
+    Loaded once per worker process by the prewarm hook, not per call: reading the model
+    in while a caller waits would put a pause on the front of every conversation.
+    """
     return silero.VAD.load()

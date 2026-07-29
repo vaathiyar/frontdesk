@@ -25,11 +25,11 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.errors import GraphRecursionError
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
+from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
 from livekit.plugins import langchain
 
 from receptionist.agent.graph import RECURSION_LIMIT, STUCK, build_graph
-from receptionist.agent.providers import build_stt, build_tts, build_vad
+from receptionist.agent.providers import build_stt, build_tts, load_vad
 from receptionist.agent.tools import CallContext
 from receptionist.finish import finish_call, summarise
 from receptionist.models import CallRecord
@@ -101,7 +101,7 @@ async def entrypoint(ctx: JobContext) -> None:
     call = CallContext(calendar=build_calendar(profile), record=record)
     logger.info("call started: profile=%s caller=%s", profile.id, record.caller_number)
 
-    session = AgentSession(vad=build_vad(), stt=build_stt(), tts=build_tts())
+    session = AgentSession(vad=_vad(ctx), stt=build_stt(), tts=build_tts())
 
     @session.on("conversation_item_added")
     def _remember(event: Any) -> None:
@@ -139,6 +139,16 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.say(profile.greeting)
 
 
+def prewarm(proc: JobProcess) -> None:
+    """Load the voice-activity model before any call arrives, once per worker process."""
+    proc.userdata["vad"] = load_vad()
+
+
+def _vad(ctx: JobContext) -> Any:
+    vad = ctx.proc.userdata.get("vad")
+    return vad if vad is not None else load_vad()
+
+
 def _profile_id(ctx: JobContext) -> str:
     """Which business this call is for: the SIP dispatch rule's metadata, else the
     configured default for a local `console` run."""
@@ -157,15 +167,20 @@ def _caller_number(ctx: JobContext) -> str:
     try:
         for participant in ctx.room.remote_participants.values():
             number = participant.attributes.get("sip.phoneNumber")
-            if number:
-                return str(number)
+            # Must be a real string: in console mode the room is a MagicMock, whose
+            # every attribute is truthy, and a mock's repr was ending up on the record
+            # as the caller's number.
+            if isinstance(number, str) and number.strip():
+                return number.strip()
     except Exception:  # pragma: no cover - console mode must never break on this
         pass
     return "local-console"
 
 
 def main() -> None:
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name=AGENT_NAME))
+    cli.run_app(
+        WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm, agent_name=AGENT_NAME)
+    )
 
 
 if __name__ == "__main__":
