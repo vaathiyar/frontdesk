@@ -1,0 +1,7 @@
+{
+  "_comment": "The routing table: which phone number is answered as which business. Every key must be a DID your telephony provider delivers to livekit-sip, in E.164. Every value must be a profile registered in src/receptionist/profiles/__init__.py. Apply it with deploy/sip/provision.py — see deploy/README.md.",
+  "numbers": {
+    "+16042969870": "hvac",
+    "+16042969871": "restaurant"
+  }
+}

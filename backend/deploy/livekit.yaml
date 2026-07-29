@@ -11,5 +11,10 @@ rtc:
   use_external_ip: false
 keys:
   apk: "123"
+# Required for SIP even on a single node: livekit-sip is a separate process, and
+# livekit-server rejects every SIP API call with "sip not connected (redis required)"
+# until the two share a Redis.
+redis:
+  address: 127.0.0.1:6379
 logging:
   level: info

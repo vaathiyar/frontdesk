@@ -21,15 +21,12 @@ useless if a phone can't open it.
 ```
 deploy/
   README.md                     <- you are here
-  docker-compose.yml            worker + web, sharing a SQLite volume
+  docker-compose.yml            worker + web + one-shot SIP provisioning
   docker-compose.livekit.yml    a throwaway local LiveKit, for dev only
   livekit.yaml                  its config (trivial committed key — dev only)
   sip/
-    inbound-trunk-hvac.json         DID  -> HVAC trunk
-    inbound-trunk-restaurant.json   DID  -> Restaurant trunk
-    dispatch-rule-hvac.json         trunk -> receptionist + {"profile_id":"hvac"}
-    dispatch-rule-restaurant.json   trunk -> receptionist + {"profile_id":"restaurant"}
-    setup.sh                        provisions the above with the lk CLI
+    numbers.json                THE routing table: DID -> profile
+    provision.py                applies it to LiveKit; idempotent
 ```
 
 ## Prerequisites
@@ -39,7 +36,12 @@ deploy/
 - A **GCP service account** with Cloud Speech-to-Text, Text-to-Speech and Calendar enabled.
 - A **Gemini API key**.
 - A **Telnyx** number assigned to a messaging profile, for the confirmation text.
-- The **`lk` CLI** for SIP provisioning — <https://docs.livekit.io/home/cli/>
+- **Redis, shared between livekit-server and livekit-sip.** Not optional, even on a single
+  node: they are separate processes that coordinate through it, and without it every SIP
+  API call fails with `sip not connected (redis required)`.
+
+No `lk` CLI needed — SIP is provisioned by `deploy/sip/provision.py`, which uses the
+`livekit-api` package we already depend on.
 
 ## 1. Both services
 
@@ -91,29 +93,45 @@ Scale the worker by adding replicas; one worker handles several concurrent calls
 
 ## 2. SIP: one DID per profile
 
-The **DID → profile mapping lives in each dispatch rule's
-`roomConfig.agents[].metadata`.** That is the whole routing table.
+Edit one file — `sip/numbers.json` **is** the routing table:
 
-- `+16045550001` → `hvac-call-*` → `{"profile_id":"hvac"}`
-- `+16045550002` → `restaurant-call-*` → `{"profile_id":"restaurant"}`
-
-The numbers in `sip/inbound-trunk-*.json` are **placeholders** — replace them with your
-real DIDs in E.164, matching what your provider delivers to livekit-sip.
-
-```bash
-cd backend
-bash deploy/sip/setup.sh
+```json
+{ "numbers": { "+16042969870": "hvac", "+16042969871": "restaurant" } }
 ```
 
-The first run creates the trunks and prints their IDs (`ST_...`). Paste each into the
-matching `dispatch-rule-*.json` `trunk_ids`, then re-run to create the rules.
+The `sip` service in the compose file applies it on `up`. To run it by hand:
 
-`agentName` in every rule is `receptionist` and must match the worker's registered name
-(`AGENT_NAME` in `agent/worker.py`). **The worker must be running for dispatch to attach
-it to a call.**
+```bash
+uv run python deploy/sip/provision.py           # apply
+uv run python deploy/sip/provision.py --show    # read-only: what's there now
+```
 
-Adding a profile: one more trunk + rule pair with the new `profile_id`, plus the profile
-registered in `src/receptionist/profiles/__init__.py`.
+For each entry it creates an inbound trunk matching that DID, and a dispatch rule that
+puts the caller in their own room and asks LiveKit to dispatch agent `receptionist` with
+`{"profile_id": "..."}` as job metadata. **That metadata is how one worker answers as
+either business** — the worker reads it from `ctx.job.metadata`.
+
+Idempotent, and `numbers.json` is authoritative: change a number and the next run moves
+the trunk. Only objects named `receptionist-<profile>` are ever touched, so a LiveKit
+shared with your other applications is left alone. Adding a profile is one more line here,
+plus registering it in `src/receptionist/profiles/__init__.py`.
+
+### There is nothing to "connect"
+
+A common confusion: LiveKit's SIP config is **not** a file any process reads. `provision.py`
+(like `lk`) is just an API client — it POSTs to livekit-server, which stores the config, and
+livekit-sip reads it from there via Redis. `LIVEKIT_URL` + `LIVEKIT_API_KEY` +
+`LIVEKIT_API_SECRET` are the entire bridge, which is why it does not matter where the
+provisioner runs.
+
+### Two ways this fails silently
+
+**No dispatch rule** → the call connects, a room is created, nobody joins, and the caller
+hears silence. `provision.py --show` says so explicitly when rules are missing.
+
+**No worker registered when the call lands** → same symptom. Because the worker registers
+with an `agent_name`, dispatch is explicit and there is no auto-join fallback. Confirm
+`registered worker {"agent_name": "receptionist", ...}` in the worker log before dialling.
 
 > **Explicit dispatch, not automatic.** Because the worker registers with an
 > `agent_name`, joining a room does *not* summon it — a dispatch rule (or an explicit
@@ -138,20 +156,24 @@ numbers does; a sole-proprietor brand is ~$22 and usually approved same day. `+1
 
 ## Local LiveKit for development
 
-`docker-compose.livekit.yml` runs a single-node throwaway server so `agent.py dev` has
-something to register with. **Development only** — the committed `apk`/`123` key is
-worthless, and livekit-server logs `secret is too short` and starts anyway.
+`docker-compose.livekit.yml` runs a throwaway stack — redis, livekit-server and
+livekit-sip — so `agent.py dev` has somewhere to register and `provision.py` has somewhere
+to apply. **Development only:** the committed `apk`/`123` key is worthless, and
+livekit-server logs `secret is too short` and starts anyway.
 
 ```bash
 docker compose -f deploy/docker-compose.livekit.yml up -d
-LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=apk LIVEKIT_API_SECRET=123 \
-  uv run agent.py dev
+
+export LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=apk LIVEKIT_API_SECRET=123
+uv run python deploy/sip/provision.py     # needs redis up, or "sip not connected"
+uv run agent.py dev
+
 docker compose -f deploy/docker-compose.livekit.yml down
 ```
 
-It uses host networking so WebRTC's UDP media range is reachable. A browser on Windows
-hitting a WSL2 container gets TCP localhost forwarding but not the UDP range, so media
-would have to fall back to ICE/TCP on 7881 — untested. `agent.py console` remains the
+Host networking, so SIP signalling (5060) and the RTP range are reachable. A browser on
+Windows hitting a WSL2 container gets TCP localhost forwarding but not the UDP range, so
+media would fall back to ICE/TCP on 7881 — untested. `agent.py console` remains the
 reliable way to hear the agent.
 
 ## References

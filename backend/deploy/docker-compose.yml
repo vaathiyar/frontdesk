@@ -28,6 +28,16 @@ services:
     # No inbound ports, no domain, no health check.
     restart: unless-stopped
 
+  # Runs once, then exits: applies deploy/sip/numbers.json to LiveKit so each DID is
+  # answered as the right business. Idempotent — `up` again and it reconciles.
+  # Skip it with `--scale sip=0` if something else owns your SIP config.
+  sip:
+    image: receptionist
+    depends_on: [worker]
+    command: ["uv", "run", "python", "deploy/sip/provision.py"]
+    env_file: ../.env
+    restart: "no"
+
   web:
     image: receptionist
     depends_on: [worker]

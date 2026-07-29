@@ -1,6 +1,6 @@
-# A throwaway local LiveKit server, so `agent.py dev` has something to register with.
-# LOCAL DEVELOPMENT ONLY. Single node, so no Redis — that is only needed to run several
-# LiveKit instances as a cluster.
+# A throwaway local LiveKit, so `agent.py dev` has something to register with and
+# deploy/sip/provision.py has somewhere to apply the routing table.
+# LOCAL DEVELOPMENT ONLY — the apk/123 key in livekit.yaml is worthless on purpose.
 #
 #   cd backend
 #   docker compose -f deploy/docker-compose.livekit.yml up -d
@@ -11,13 +11,45 @@
 #
 #   LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=apk LIVEKIT_API_SECRET=123 \
 #     uv run agent.py dev
+#
+# Redis is NOT optional here, even single-node. livekit-sip is a separate process from
+# livekit-server and they coordinate through Redis; without it every SIP API call fails
+# with "sip not connected (redis required)".
 services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # Published rather than host-networked so the host-networked services below reach it
+    # at 127.0.0.1:6379, which is what both configs name.
+    ports: ["6379:6379"]
+
   livekit:
     image: livekit/livekit-server:latest
     command: ["--config", "/etc/livekit.yaml"]
-    # Host networking: WebRTC needs its UDP media ports reachable, and publishing a whole
-    # range through the bridge is both slow to start and unreliable.
+    # Host networking: WebRTC needs its UDP media range reachable, and publishing the
+    # whole range through the bridge is slow to start and flaky.
     network_mode: host
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
+    depends_on: [redis]
+    restart: unless-stopped
+
+  # Only needed to exercise the phone path. Point your provider's SIP trunk at this
+  # host's port 5060; `agent.py console` needs none of it.
+  livekit-sip:
+    image: livekit/sip:latest
+    # Host networking for SIP signalling (5060) and the RTP media range.
+    network_mode: host
+    environment:
+      SIP_CONFIG_BODY: |
+        log_level: info
+        api_key: apk
+        api_secret: "123"
+        ws_url: ws://127.0.0.1:7880
+        redis:
+          address: 127.0.0.1:6379
+        sip_port: 5060
+        rtp_port: 10000-20000
+        use_external_ip: true
+    depends_on: [livekit, redis]
     restart: unless-stopped

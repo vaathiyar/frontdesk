@@ -123,15 +123,17 @@ One module, one registry line. A profile is data plus the tools it picks:
 ```python
 # src/receptionist/profiles/dental.py
 @tool(parse_docstring=True)
-async def book(service: str, day: str, time: str, name: str, reason: str,
-               runtime: ToolRuntime[CallContext]) -> str:
+async def book(
+    service: str, day: str, time: str, name: str, reason: str, runtime: ToolRuntime[CallContext]
+) -> str:
     """Book an appointment. ...
 
     Args:
         ...
     """
-    return await save_booking(runtime, service=service, day=day, time=time,
-                              details={"name": name, "reason": reason})
+    return await save_booking(
+        runtime, service=service, day=day, time=time, details={"name": name, "reason": reason}
+    )
 
 
 DENTAL = Profile(
