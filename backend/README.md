@@ -1,177 +1,195 @@
 # AI Receptionist — Backend
 
-One engine, swappable **call profiles**. A caller reaches the agent, which books /
-reschedules / cancels an appointment on the same call, answers questions about the
-business, or takes a message — and produces one `CallRecord` (transcript, decision
-timeline, outcome, booking) that the email summary and web detail view both read.
+A caller phones a small business. The agent answers, books / reschedules / cancels on the
+same call, answers questions about the business, or takes a message — then texts the
+caller a confirmation with a link to the transcript and an add-to-calendar button.
 
-The same brain answers behind **two drivers**: a **voice** path (LiveKit —
-VAD ▸ STT ▸ LLM ▸ TTS on a real phone call) and a **text** path (the dev REPL and
-the test suites). The prompt and the six tools live in one place, so what you iterate
-on in text is exactly what answers the phone.
+**One brain, two drivers.** A LangGraph agent owns the prompt and the tools. A text REPL
+and the LiveKit voice worker both drive that same graph, so what you iterate on by typing
+is what answers the phone.
 
-Design & rationale: **[`../docs/lld.md`](../docs/lld.md)**. Voice + telephony delivery plan: [`../docs/voice_livekit_sip_plan.md`](../docs/voice_livekit_sip_plan.md). Requirements: [`../docs/poc_requirements_p0.md`](../docs/poc_requirements_p0.md).
+```
+START ─▶ model ─▶ (tools ─▶ model)* ─▶ END
+```
 
-> All commands below run from this `backend/` directory.
-
-## Status
-
-The **brain + dev harness** are done and tested with no network: the profile engine,
-the six tools, the tool-use loop, a text REPL, and an offline unit suite plus a live
-LLM e2e suite. The **voice stack** (LiveKit worker + Google STT/TTS + Silero VAD) is
-now wired around that same brain — talk to it locally with `agent.py console`, or point
-it at your self-hosted LiveKit for real phone calls (see [Running the agent](#running-the-agent)).
-
-Still deferred (and designed in [`../docs/lld.md`](../docs/lld.md)): the real
-`GoogleCalendarService` (today it runs on a seeded fake), the owner-notification email,
-durable CockroachDB persistence, and the web app.
+That's the whole control flow, in `src/receptionist/agent/graph.py`. Everything
+business-specific lives in the prompt and the tools.
 
 ## Quickstart
 
 ```bash
-uv sync                      # create .venv, install deps
-uv run pytest -q             # 36 tests, no network, no API key needed
+uv sync
+uv run pytest -q                                    # no network, no API key
 
-# To chat with the agent you need a Google API key (Gemini):
-export GOOGLE_API_KEY=...                # or set it in .env
-uv run python scripts/chat.py hvac      # also: restaurant
+export GOOGLE_API_KEY=...                           # or put it in .env
+uv run python scripts/chat.py hvac --fake-calendar   # also: restaurant
 ```
 
-Type as the caller. On exit the harness prints the resulting `CallRecord` — outcome,
-captured fields, the code-emitted decision timeline, and the signed share link:
+Type as the caller; `quit` ends the call and prints the resulting `CallRecord` plus the
+confirmation text that would be sent:
 
 ```
-caller> my furnace quit, can someone come Tuesday morning?
-agent>  I can help with that. ...
+caller> my furnace quit, can someone come tomorrow morning?
+agent>  We can help with that. Tomorrow we have 9:00 AM or 10:00 AM open. What's your
+        name and address?
 ...
 ────────────────────────────────────────────────────────────────
-  CallRecord 3f2a…   profile: hvac   caller: +1-555-0100
   outcome: booked
-  booking: furnace repair @ Tuesday 10:00 AM  (evt_1a2b3c4d)
-  fields:  name='Sam Lee', address='12 Oak St', issue='no heat', email='sam@example.com'
+  booking: furnace repair @ Thu Jul 30, 9:00 AM  (evt_3c409385)
+  details: name='Sam Lee', address='12 Oak St, Burnaby', issue='no heat'
   decision timeline:
-    • availability_checked: Tuesday: 10:00 AM, 1:00 PM, 3:00 PM
-    • booking_created: furnace repair — Tuesday 10:00 AM
-  share link: /c/3f2a…?t=…
+    • availability_checked: Thursday, July 30: 9:00 AM, 10:00 AM, ...
+    • booking_created: furnace repair on Thursday, July 30 at 9:00 AM
+    • sms_skipped: no Telnyx credentials for this number
 ```
 
-The fake calendar seeds **tomorrow 8:00 AM as busy**, so ask for it to watch the agent
-decline and offer another time — and note it never claims a booking the tool didn't make.
+The fake calendar seeds **tomorrow's first opening as busy**, so ask for it and watch the
+agent decline and offer real alternatives — it never claims a booking the tool didn't make.
 
-## Running the agent
-
-The text REPL above is the fast inner loop; the LiveKit worker (`agent.py`) is the
-voice path. Both drive the same brain — pick a mode:
+## Running it
 
 | Command | What it does | Needs |
 |---|---|---|
-| `uv run python scripts/chat.py hvac` | Text REPL — type as the caller, no telephony | `GOOGLE_API_KEY` |
-| `uv run pytest -q` | Offline unit suite (36 tests, no network) | — |
-| `uv run pytest -m e2e -s` | Live LLM e2e — simulated caller against real Gemini | `GOOGLE_API_KEY` |
-| `uv run agent.py console` | **Local voice** — talk through your mic/speakers | Google (key + JSON) |
-| `uv run agent.py dev` | Connect to your self-hosted LiveKit; test in a browser/room | Google + `LIVEKIT_*` |
-| `uv run agent.py start` | Production worker | Google + `LIVEKIT_*` |
+| `uv run pytest -q` | 122 offline tests | — |
+| `uv run python scripts/chat.py hvac` | Text REPL — type as the caller | `GOOGLE_API_KEY` |
+| `uv run python serve.py` | The call-detail page texts link to | — |
+| `uv run agent.py console --text` | Whole voice pipeline, typed | Google (key + JSON) |
+| `uv run agent.py console` | Local mic and speakers | Google (key + JSON) |
+| `uv run agent.py dev` / `start` | Against your LiveKit server | Google + `LIVEKIT_*` |
 
-### Local voice (recommended first test)
+**`--fake-calendar` matters.** With `RECEPTIONIST_CALENDAR_IDS` set, the REPL books into
+that *real* Google Calendar; the flag keeps bookings in memory. The REPL prints which
+backend it is using on startup. Note `agent.py` has no such flag — a console call that
+reaches `book` will create a real event.
 
-`uv run agent.py console` runs the whole pipeline — Silero VAD, Google Cloud STT/TTS,
-Gemini reasoning — locally against your mic and speakers, with **no LiveKit server
-required**. Set `RECEPTIONIST_PROFILE=restaurant` to try the other profile (default
-`hvac`). It needs both Google credentials: `GOOGLE_API_KEY` (Gemini) and
-`GOOGLE_CREDENTIALS_FILE_PATH` (a GCP service-account JSON with Cloud
-Speech-to-Text + Text-to-Speech enabled).
-
-### Against your self-hosted LiveKit
-
-This is **not** LiveKit Cloud — you run `livekit-server` + `livekit-sip` yourself
-(e.g. on Hetzner via Coolify). The worker dials *out* to it using `LIVEKIT_URL` /
-`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`:
-
-- `uv run agent.py dev` — connect and test from a browser/room.
-- `uv run agent.py start` — the production worker command.
-
-### Phone / SIP
-
-On your LiveKit server, configure a SIP **inbound trunk** + **dispatch rule** per DID
-(see [`deploy/sip/`](deploy/sip/) and [`deploy/README.md`](deploy/README.md)).
-The DID's dispatch rule carries `{"profile_id":"hvac"}` metadata that selects the
-profile, and the worker reads the caller's number from the `sip.phoneNumber` participant
-attribute. Adding a profile = one more (trunk, rule) pair.
+**Local voice on WSL2** works through WSLg's PulseAudio. Wear headphones: the Python
+console has no echo cancellation, so on speakers the agent interrupts itself.
+`uv run agent.py console --list-devices`, then `--input-device pulse` if it picks wrong.
 
 ### Docker
 
-Build from this directory, then run with the env vars set and the service-account JSON
-mounted (see [`deploy/README.md`](deploy/README.md)):
-
 ```bash
-docker build -t receptionist-agent .
+SA_JSON=/abs/path/to/service-account.json \
+  docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-The same image deploys in Coolify next to LiveKit. The worker needs **outbound network
-only** — no inbound ports (SIP media terminates at LiveKit, not in the container).
+Two services from one image: the voice `worker` (dials out, no inbound ports) and `web`
+(serves the page). They share a SQLite volume, because the worker writes each call and the
+web process resolves the link that was texted about it. See
+[`deploy/README.md`](deploy/README.md).
 
-## Environment variables
+## How a call becomes a text
 
-Local runs read `.env` automatically; copy [`.env.example`](.env.example) as the
-starting template.
+1. `agent/worker.py` answers, reads the profile from the SIP dispatch metadata and the
+   caller's number from `sip.phoneNumber`.
+2. Every turn runs the graph. Tools are the only way the agent changes anything, and each
+   one records what it did on the `CallRecord`.
+3. On hang-up, `finish.py` composes the text, sends it, and saves the call.
+4. The text carries one short link. `web/page.py` renders the transcript, the decision
+   timeline, and an **Add to Google Calendar** button.
+
+The confirmation text is split by what can be trusted with what: Gemini writes the opening
+sentence or two and is *forbidden* from stating the date or time; the appointment facts and
+the link are rendered from the record. If the model call fails, the facts go out alone.
+
+## Environment
+
+Local runs read `.env`; copy [`.env.example`](.env.example).
 
 | Var | Purpose |
 |---|---|
-| `GOOGLE_API_KEY` | Gemini (the reasoning LLM) |
-| `GOOGLE_CREDENTIALS_FILE_PATH` | Path to a GCP service-account JSON with Cloud Speech-to-Text + Text-to-Speech enabled (voice STT/TTS) |
-| `LIVEKIT_URL` | Your self-hosted livekit-server URL (`wss://` prod, `ws://` local) |
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | LiveKit API credentials |
-| `RECEPTIONIST_PROFILE` | Profile for local `agent.py console` when there's no SIP metadata (default `hvac`) |
-| `RECEPTIONIST_LINK_SECRET` / `RECEPTIONIST_PUBLIC_BASE_URL` | Signed share-link config |
+| `GOOGLE_API_KEY` | Gemini — the reasoning model |
+| `GOOGLE_CREDENTIALS_FILE_PATH` | Service-account JSON: Cloud STT/TTS + Calendar |
+| `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Your LiveKit server |
+| `TELNYX_API_KEY` / `TELNYX_FROM_NUMBER` | The confirmation text. Unset ⇒ printed, not sent |
+| `RECEPTIONIST_CALENDAR_IDS` | JSON map `profile_id → Google Calendar ID`; omitted ⇒ fake |
+| `RECEPTIONIST_TIMEZONE` | Where all booking arithmetic happens |
+| `RECEPTIONIST_PUBLIC_BASE_URL` | Goes into the text, so it must be reachable from a phone |
+| `RECEPTIONIST_LINK_SECRET` | Signs those links — worker and web must share it |
+| `RECEPTIONIST_DATABASE_PATH` | The SQLite file both processes use |
+| `RECEPTIONIST_PROFILE` | Which profile `agent.py console` answers as |
 
-### Google auth: two distinct mechanisms
+The two Google credentials are **not** interchangeable: Gemini uses the API key, Cloud
+STT/TTS and Calendar use the service-account JSON. Voice needs both.
 
-The two Google credentials are **not** interchangeable. Gemini (reasoning) uses the
-`GOOGLE_API_KEY`; Cloud STT/TTS use the service-account JSON pointed to by
-`GOOGLE_CREDENTIALS_FILE_PATH`. Voice needs **both**. If `agent.py console` fails with
-an auth error on STT/TTS, it's the service account — not the API key.
+Model and voice parameters (model id, thinking level, STT/TTS voices) are code constants
+in `agent/graph.py` and `agent/providers.py` — deliberately not env-configurable, because a
+wrong value there is a broken call, not a preference.
 
 ## Add a profile
 
-The extension model in one file — no engine changes:
+One module, one registry line. A profile is data plus the tools it picks:
 
 ```python
 # src/receptionist/profiles/dental.py
-class DentalReceptionist(Receptionist):
-    profile_id = "dental"
-    business_name = "Riverside Dental"
-    greeting = "Thanks for calling Riverside Dental!"
+@tool(parse_docstring=True)
+async def book(service: str, day: str, time: str, name: str, reason: str,
+               runtime: ToolRuntime[CallContext]) -> str:
+    """Book an appointment. ...
 
-    def domain_prompt(self) -> str: ...  # role, services, tone
-    def booking_fields(self) -> list[Field]:
-        return [NAME, ..., EMAIL]
+    Args:
+        ...
+    """
+    return await save_booking(runtime, service=service, day=day, time=time,
+                              details={"name": name, "reason": reason})
 
-    def knowledge(self) -> str: ...  # facts for answer_question
+
+DENTAL = Profile(
+    id="dental",
+    business="Riverside Dental",
+    greeting="Thanks for calling Riverside Dental!",
+    does="You book cleanings and checkups. ...",
+    knowledge="Hours are ...",
+    tools=(check_availability, book, reschedule, cancel, take_message, end_call),
+    opens=9,
+    closes=17,
+)
 ```
 
-Then one line in `src/receptionist/profiles/factory.py`: `"dental": DentalReceptionist`.
-To answer a real phone line with it, add one more SIP (trunk, dispatch-rule) pair on
-your LiveKit server (see [Running the agent](#running-the-agent)).
+Then one line in `profiles/__init__.py`. `book`'s parameters *are* the details that
+profile collects — that signature is the schema the model sees. `tools` is the whole
+capability list, so leaving a tool out is how you say this profile can't do that.
+
+To answer a real number with it, add one SIP (trunk, dispatch-rule) pair — see
+[`deploy/README.md`](deploy/README.md).
 
 ## Layout
 
 ```
-agent.py          LiveKit voice worker — the entrypoint you run (console | dev | start)
+agent.py            LiveKit voice worker      (console | dev | start)
+serve.py            the call-detail web page
+scripts/chat.py     the text REPL
 src/receptionist/
-  core/        CallRecord + repository interface + links + settings   (shared contract)
-  profiles/    Receptionist base + hvac/restaurant + factory          (extension surface)
-  services/    CalendarService interface + seeded FakeCalendarService
-  agent/       ConversationRunner (text driver) + ReceptionistAgent   (LiveKit voice adapter)
-  providers/   Gemini chat adapter + Google STT/TTS + Silero VAD — the one place that names a vendor
-  persistence/ InMemoryCallRepository (CockroachDB later)
-scripts/chat.py   the text dev REPL
-tests/            offline coverage (fake calendar + fake LLM) + live e2e (test_e2e.py)
+  agent/
+    graph.py        THE BRAIN — the two-node graph and the text driver
+    tools.py        what the agent can do, and save_booking
+    prompt.py       the one system prompt
+    worker.py       LiveKit entrypoint; llm_node is the whole integration
+    providers.py    STT / TTS / VAD — the only place a speech vendor is named
+  profiles/         Profile + hvac + restaurant + registry
+  services/
+    calendar.py     CalendarService protocol + the in-memory fake
+    google_calendar.py
+    when.py         turning what a caller said about time into datetimes
+    sms.py          Telnyx — one POST
+    summary.py      composing the confirmation text
+  web/              app.py (routes) + page.py (server-rendered HTML)
+  models.py         CallRecord — the one shape everything reads
+  store.py          SQLite
+  links.py          signed call links + add-to-calendar links
+  finish.py         everything that happens when a call ends
+  settings.py
+tests/              17 tests that state the guarantees — read these
+  ai_generated/     105 more for coverage — not required reading
 ```
 
 ## Quality
 
 ```bash
-uv run ruff check . && uv run ruff format --check .
+uv run ruff format --check . && uv run ruff check .
 uv run mypy
-uv run pytest
+uv run pytest -q
 ```
+
+Requires Python 3.12+. `mypy --strict` over `src`; the vendor boundaries treated as opaque
+are listed with reasons in `pyproject.toml`.

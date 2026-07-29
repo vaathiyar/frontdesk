@@ -1,5 +1,11 @@
 # Voice + LiveKit SIP — Delivery Plan
 
+> **Historical.** This plan has been delivered, and the engine it describes has since been
+> rebuilt on LangGraph — so its code sketches (`ConversationRunner`, `providers/factory.py`,
+> `tool_schemas()`) no longer match the tree. Kept for the telephony reasoning and the SIP
+> reference links, which still hold. For the design as actually built, read
+> [`lld.md`](./lld.md); for running it, [`../backend/deploy/README.md`](../backend/deploy/README.md).
+
 > How we get from today's text-only brain to a **hostable Docker image that answers a real phone call** over LiveKit SIP. Companion to [`lld.md`](./lld.md).
 
 ---

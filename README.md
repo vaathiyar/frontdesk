@@ -1,36 +1,49 @@
 # frontdesk
 
-A proof-of-concept **AI receptionist** — one engine, swappable call profiles (HVAC
-and restaurant). A caller books/reschedules/cancels on the call, gets questions
-answered, or leaves a message; every call yields one `CallRecord` that the owner
-notification and the web view both render.
+A proof-of-concept **AI receptionist** for small businesses. A caller phones in; the agent
+books, reschedules or cancels on the call, answers questions about the business, or takes a
+message — then texts the caller a confirmation with a link to the transcript and an
+add-to-calendar button.
 
-The same brain answers two ways: a **text** dev REPL for fast iteration and testing,
-and a **voice** worker that takes real phone calls over **LiveKit** — self-hosted
-(`livekit-server` + `livekit-sip`, not LiveKit Cloud), with Gemini for reasoning and
-Google Cloud for speech. Run modes and details: [`backend/README.md`](backend/README.md).
+**One brain, two drivers.** A LangGraph agent owns the prompt and the tools; a text REPL
+and a LiveKit voice worker both drive that same graph, so what you iterate on by typing is
+what answers the phone. Gemini reasons, Google Cloud does speech, LiveKit carries the call
+(self-hosted `livekit-server` + `livekit-sip`, not LiveKit Cloud), and Telnyx sends the text.
+
+Two profiles ship — HVAC and restaurant — and adding a vertical is one module plus one
+registry line.
 
 ## Repository
 
 ```
-backend/     Python engine, LiveKit voice worker, and text dev harness — the brain and its tools
-frontend/    Web app: live "recent calls" dashboard + signed call-detail view (planned)
-docs/        Design (lld.md), the P0 requirements, and the voice + LiveKit SIP delivery plan
+backend/     the agent, the voice worker, the web page, and the dev REPL
+frontend/    a richer "recent calls" dashboard (specced, not built)
+docs/        lld.md (the design as built), the P0 requirements, config reference
 ```
 
-- **Backend** — runnable and tested today (text + voice). See [`backend/README.md`](backend/README.md).
-- **Frontend** — being specced; see the plan under `docs/` once available.
-- **Design** — start with [`docs/lld.md`](docs/lld.md); voice/telephony in [`docs/voice_livekit_sip_plan.md`](docs/voice_livekit_sip_plan.md).
+- **Backend** — runnable and tested. Start at [`backend/README.md`](backend/README.md).
+- **Design** — [`docs/lld.md`](docs/lld.md) describes what exists, including the parts
+  that were hard to get right.
+- **Config** — every environment variable and where to obtain it:
+  [`docs/config.md`](docs/config.md).
+- **Frontend** — the current web page is a single server-rendered call-detail view inside
+  `backend/`. The React dashboard in `docs/frontend_spec.md` is still a plan.
 
-## Quickstart (backend)
+## Quickstart
 
 ```bash
 cd backend
 uv sync
-uv run pytest -q                    # 36 tests, offline
-export GOOGLE_API_KEY=...           # Gemini; or set it in .env
-uv run python scripts/chat.py hvac  # text chat with the agent (no telephony)
+uv run pytest -q                                     # 122 tests, offline, no API key
+
+export GOOGLE_API_KEY=...                            # Gemini; or set it in .env
+uv run python scripts/chat.py hvac --fake-calendar   # talk to it, no telephony
 ```
 
-For the voice path — `agent.py console` (local mic/speakers) or a self-hosted LiveKit
-connection — see [`backend/README.md`](backend/README.md).
+Ask for tomorrow's first opening to watch it decline a taken slot and offer real
+alternatives. `quit` prints the resulting call record and the text it would send.
+
+To hear it: `uv run agent.py console` (local mic and speakers, no server needed — wear
+headphones, there's no echo cancellation). For real phone calls and Docker, see
+[`backend/README.md`](backend/README.md) and
+[`backend/deploy/README.md`](backend/deploy/README.md).

@@ -1,36 +1,27 @@
 # syntax=docker/dockerfile:1
 #
-# Receptionist LiveKit voice-agent worker (self-hosted LiveKit).
+# One image, two processes:
 #
-#   Build context: backend/     ->  docker build -t receptionist-agent .
+#   agent.py start   the LiveKit voice worker — answers calls, dials OUT to LiveKit,
+#                    exposes no ports
+#   serve.py         the call-detail page every confirmation text links to — needs an
+#                    inbound port and a publicly reachable URL
 #
-# The worker dials OUT to your livekit-server over a WebSocket and registers as the
-# agent "receptionist" (explicit dispatch). It exposes NO inbound ports.
+# Both read the same SQLite file, so they must share a volume: the worker writes the
+# call, the web process resolves the link that was texted about it.
 #
-# Required runtime env:
-#   LIVEKIT_URL                     wss:// URL of your self-hosted livekit-server
-#   LIVEKIT_API_KEY                 API key for that server
-#   LIVEKIT_API_SECRET             API secret for that server
-#   GOOGLE_API_KEY                  Gemini API key (the agent's "brain")
-#   GOOGLE_CREDENTIALS_FILE_PATH  path to the GCP service-account JSON for Cloud
-#                                   Speech-to-Text + Text-to-Speech. Mount the JSON
-#                                   as a file/secret and point this var at it, e.g.
-#                                     -v /abs/sa.json:/secrets/sa.json \
-#                                     -e GOOGLE_CREDENTIALS_FILE_PATH=/secrets/sa.json
+#   docker build -t receptionist .                      # context: backend/
+#   docker compose -f deploy/docker-compose.yml up -d    # both services
 #
-# See deploy/README.md for the full build/run + SIP setup guide.
+# See deploy/README.md for env vars and SIP setup.
 
 ARG PYTHON_VERSION=3.13
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS base
-# UV_NO_SYNC makes `uv run` use the venv exactly as we built it, instead of re-syncing.
-# Why it matters: `uv run` re-syncs the environment by default and INCLUDES the `dev`
-# dependency group — so it would undo our `uv sync --no-dev`, reinstalling mypy/ruff/pytest
-# into the runtime image AND rebuilding the project + recompiling bytecode on every
-# container start. With deps installed explicitly (below) this keeps both the build's
-# download-files step and the runtime CMD dev-free, offline, and instant to start.
-# HF_HOME keeps any downloaded model cache under /app so weights baked at build time are
-# copied into the final image and stay readable by the non-root runtime user. (Silero VAD's
-# own ONNX weights ship inside the livekit-plugins-silero wheel, so they are baked in too.)
+# UV_NO_SYNC: `uv run` re-syncs by default AND pulls in the dev group, which would undo
+# `uv sync --no-dev` and reinstall pytest/mypy/ruff on every container start. With deps
+# installed explicitly below, this keeps startup instant, offline and dev-free.
+# HF_HOME under /app so model weights baked at build time land in the final image and
+# stay readable by the non-root runtime user.
 ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_NO_SYNC=1 \
@@ -41,28 +32,30 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc g++ python3-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# 1) Install third-party deps first, in a layer keyed only on the lockfile so it is
-#    cached across source-only changes. --no-install-project: our own package needs
-#    src/, which isn't copied yet.
+# Third-party deps first, in a layer keyed only on the lockfile, so source-only changes
+# don't reinstall them. --no-install-project: our own package needs src/, not copied yet.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
-# 2) Add the source and install the project itself.
 COPY . .
 RUN uv sync --locked --no-dev
-# 3) Bake Silero VAD (and any turn-detector) weights into the image for fast cold starts.
-#    UV_NO_SYNC (set in `base`) makes this run in the --no-dev venv from step 2 without
-#    re-syncing, so no dev deps leak in here.
-RUN uv run agent.py download-files
+# Bake the Silero VAD weights in so a cold container doesn't make the first caller wait.
+# Invoked through the module, not `agent.py download-files`, which livekit-agents
+# deprecated in 1.5.10 — and the module form fetches all three plugins, not just one.
+RUN uv run python -m livekit.agents download-files
 
 FROM base
 ARG UID=10001
-# onnxruntime (Silero VAD) needs libgomp at runtime; not pulled in by the slim base.
+# onnxruntime (Silero VAD) needs libgomp at runtime; not in the slim base.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 RUN adduser --disabled-password --gecos "" --home /app --shell /sbin/nologin --uid ${UID} appuser
 WORKDIR /app
 COPY --from=build --chown=appuser:appuser /app /app
+# Where the shared SQLite file lives. Mount a volume here or calls vanish on restart.
+RUN mkdir -p /data && chown appuser:appuser /data
+ENV RECEPTIONIST_DATABASE_PATH=/data/calls.db
 USER appuser
-# The worker dials OUT to LiveKit over WebSocket; no inbound ports are needed.
+# The voice worker by default. A fixed CMD with no wrapper script, so LiveKit's graceful
+# drain on SIGTERM reaches the process and live calls aren't cut off mid-sentence.
 CMD ["uv", "run", "agent.py", "start"]
