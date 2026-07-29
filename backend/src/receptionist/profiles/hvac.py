@@ -5,7 +5,15 @@ from __future__ import annotations
 from langchain_core.tools import tool
 from langgraph.prebuilt.tool_node import ToolRuntime
 
-from receptionist.agent.tools import CallContext, save_booking
+from receptionist.agent.tools import (
+    CallContext,
+    cancel,
+    check_availability,
+    end_call,
+    reschedule,
+    save_booking,
+    take_message,
+)
 from receptionist.profiles.profile import Profile
 
 
@@ -56,5 +64,5 @@ HVAC = Profile(
         "makes and models, and do seasonal tune-ups. Estimates on new installations are "
         "free. Annual maintenance plans are available."
     ),
-    book=book,
+    tools=(check_availability, book, reschedule, cancel, take_message, end_call),
 )

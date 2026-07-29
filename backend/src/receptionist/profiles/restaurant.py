@@ -8,7 +8,15 @@ from pathlib import Path
 from langchain_core.tools import tool
 from langgraph.prebuilt.tool_node import ToolRuntime
 
-from receptionist.agent.tools import CallContext, save_booking
+from receptionist.agent.tools import (
+    CallContext,
+    cancel,
+    check_availability,
+    end_call,
+    reschedule,
+    save_booking,
+    take_message,
+)
 from receptionist.profiles.profile import Profile
 
 _MENU_PATH = Path(__file__).parent / "restaurant_menu.json"
@@ -57,7 +65,7 @@ RESTAURANT = Profile(
         "instead of booking."
     ),
     knowledge=f"Hours are Tuesday to Sunday, 5pm to 10pm. On the menu: {_menu()}.",
-    book=book,
+    tools=(check_availability, book, reschedule, cancel, take_message, end_call),
     # Dinner service only, matching the hours above. Without this the calendar would
     # offer a trades-hours grid and refuse every evening table a caller asked for.
     opens=17,

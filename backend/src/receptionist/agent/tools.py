@@ -177,8 +177,5 @@ async def end_call(runtime: ToolRuntime[CallContext]) -> str:
     return "The call will end after your next reply. Say a short goodbye now."
 
 
-SHARED_TOOLS = [check_availability, reschedule, cancel, take_message, end_call]
-
-
 def _describe(details: dict[str, str]) -> str:
     return ", ".join(f"{key}={value}" for key, value in details.items()) or "no details"

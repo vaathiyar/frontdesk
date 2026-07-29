@@ -13,17 +13,17 @@ iterate on in text is what answers the phone.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, Final, Literal, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.errors import GraphRecursionError
-from langgraph.graph import START, StateGraph, add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.graph import END, START, StateGraph, add_messages
+from langgraph.prebuilt import ToolNode
 
 from receptionist.agent.prompt import render
-from receptionist.agent.tools import SHARED_TOOLS, CallContext, explain_to_model
+from receptionist.agent.tools import CallContext, explain_to_model
 from receptionist.models import CallRecord
 from receptionist.profiles import Profile
 from receptionist.services.calendar import CalendarService
@@ -41,8 +41,25 @@ RECURSION_LIMIT = 2 * MAX_TOOL_ROUNDS + 1
 STUCK = "Sorry, I'm having trouble with that. Let me take a message instead."
 
 
+# The graph's two nodes. `Final` so these read as the literal strings the routing
+# annotation below names, rather than as plain `str`.
+MODEL: Final = "model"
+TOOLS: Final = "tools"
+
+
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
+
+
+def route_from_model(state: State) -> Literal["tools", "__end__"]:
+    """Either the model asked for a tool, or it has an answer and the turn is over.
+
+    The return annotation is load-bearing, not decoration: LangGraph builds the routing
+    map from it and checks at compile time that the target node exists. Drop it and a
+    wrong node name stops being a build error and becomes a silent runtime halt.
+    """
+    last = state["messages"][-1]
+    return TOOLS if getattr(last, "tool_calls", None) else END
 
 
 def chat_model() -> BaseChatModel:
@@ -58,7 +75,7 @@ def chat_model() -> BaseChatModel:
 
 def build_graph(profile: Profile, model: BaseChatModel | None = None) -> Any:
     """Compile the graph for one profile. `model` is the seam tests inject a fake into."""
-    tools = [*SHARED_TOOLS, profile.book, *profile.extra_tools]
+    tools = list(profile.tools)
     llm = (model or chat_model()).bind_tools(tools)
 
     async def call_model(state: State) -> dict[str, list[AnyMessage]]:
@@ -67,11 +84,11 @@ def build_graph(profile: Profile, model: BaseChatModel | None = None) -> Any:
         return {"messages": [await llm.ainvoke([system, *state["messages"]])]}
 
     builder = StateGraph(State, context_schema=CallContext)
-    builder.add_node("model", call_model)
-    builder.add_node("tools", ToolNode(tools, handle_tool_errors=explain_to_model))
-    builder.add_edge(START, "model")
-    builder.add_conditional_edges("model", tools_condition)
-    builder.add_edge("tools", "model")
+    builder.add_node(MODEL, call_model)
+    builder.add_node(TOOLS, ToolNode(tools, handle_tool_errors=explain_to_model))
+    builder.add_edge(START, MODEL)
+    builder.add_conditional_edges(MODEL, route_from_model)
+    builder.add_edge(TOOLS, MODEL)
     return builder.compile()
 
 
