@@ -54,7 +54,16 @@ services:
       # the server unreachable from outside it.
       HOST: 0.0.0.0
       PORT: 8000
-    ports: ["8000:8000"]
+    # `expose`, not `ports`: the container port is declared, but nothing is bound on the
+    # host. A platform proxy reaches it over the internal network, and assigning a domain
+    # is what publishes it. Binding the host here instead would sit outside that proxy —
+    # no TLS, and it fails outright when anything else already holds the port
+    # ("Bind for 0.0.0.0:8000 failed: port is already allocated").
+    #
+    # docker-compose.override.yaml publishes it for local use. Compose loads that file
+    # automatically for a bare `docker compose up`, and ignores it whenever -f names this
+    # file explicitly — which is how a platform invokes it. One file per audience, no flags.
+    expose: ["8000"]
     volumes:
       - calls:/data
     restart: unless-stopped

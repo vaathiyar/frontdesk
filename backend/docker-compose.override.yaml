@@ -1,0 +1,13 @@
+# Local-only additions to docker-compose.yaml.
+#
+# Compose merges this automatically when you run a bare `docker compose up` from backend/,
+# and skips it entirely when a file is named with -f. Coolify always passes
+# `-f .../docker-compose.yaml`, so nothing here ever reaches a deployment — which is the
+# point: publishing a host port is right on a laptop and wrong behind a platform proxy.
+#
+# 8001 on the host, because 8000 is commonly already taken by something unrelated. The
+# container side stays 8000 and cannot collide — each container has its own netns.
+# Override with:  WEB_PORT=8010 docker compose up
+services:
+  web:
+    ports: ["${WEB_PORT:-8001}:8000"]
