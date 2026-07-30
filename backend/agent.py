@@ -10,7 +10,8 @@ Run with the standard subcommands:
 `.env` is loaded into the process environment first so the LiveKit SDK sees its
 connection vars (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET) and the worker sees
 RECEPTIONIST_PROFILE. Gemini and the Google Cloud clients get their credentials via
-settings (GOOGLE_API_KEY, GOOGLE_CREDENTIALS_FILE_PATH), which reads `.env` directly.
+settings (GOOGLE_API_KEY, and the service account from GOOGLE_CREDENTIALS_JSON or
+GOOGLE_CREDENTIALS_FILE_PATH), which reads `.env` directly.
 This runs before importing the worker, which pulls in settings/providers at import time.
 """
 

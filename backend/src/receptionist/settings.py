@@ -15,8 +15,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="RECEPTIONIST_", env_file=".env", extra="ignore")
 
     # Gemini authenticates with the API key. Cloud Speech-to-Text, Text-to-Speech and
-    # Calendar authenticate with the service-account JSON at the second path.
+    # Calendar authenticate with a service account, given either inline as JSON or as a
+    # path to the key file — inline wins, and google_auth.py explains why.
+    #
+    # The inline one stays a plain `str`, deliberately: as a dict field pydantic-settings
+    # would parse it while building this singleton, so one mangled paste would turn
+    # `import receptionist.settings` into a ValidationError and take down serve.py, which
+    # never touches Google at all. google_auth.py parses it lazily instead.
     google_api_key: str = Field(default="", validation_alias="GOOGLE_API_KEY")
+    google_credentials_json: str = Field(default="", validation_alias="GOOGLE_CREDENTIALS_JSON")
     google_credentials_file_path: str = Field(
         default="", validation_alias="GOOGLE_CREDENTIALS_FILE_PATH"
     )

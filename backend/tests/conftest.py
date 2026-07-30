@@ -26,6 +26,18 @@ def never_text_anyone(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "telnyx_from_number", "")
 
 
+@pytest.fixture(autouse=True)
+def no_google_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Blank the service-account credentials for every test, for the same reason.
+
+    A dev machine's `.env` names a real service account. Without this, a test that built
+    a `GoogleCalendarService` without passing `client=` would authenticate and reach the
+    live Calendar API. Tests that exercise the configured path set the values themselves.
+    """
+    monkeypatch.setattr(settings, "google_credentials_json", "")
+    monkeypatch.setattr(settings, "google_credentials_file_path", "")
+
+
 @pytest.fixture
 def tomorrow() -> str:
     return day_after(1)

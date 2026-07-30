@@ -69,15 +69,18 @@ console has no echo cancellation, so on speakers the agent interrupts itself.
 ### Docker
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d --build
+docker compose up -d --build
 ```
 
 Two services from one image: the voice `worker` (dials out, no inbound ports) and `web`
 (serves the page). They share a SQLite volume, because the worker writes each call and the
 web process resolves the link that was texted about it.
 
-Compose does not mount the service-account JSON — mount it yourself and set
-`GOOGLE_CREDENTIALS_FILE_PATH` to its path *inside* the container. See
+`docker-compose.yaml` sits here rather than in `deploy/` on purpose: Compose resolves the
+build context against the project directory, which a platform sets for you, so a compose
+file one level down builds correctly by hand and one directory too high on a deployment.
+
+For credentials under Docker, set `GOOGLE_CREDENTIALS_JSON` — compose mounts no files. See
 [`deploy/README.md`](deploy/README.md).
 
 ## How a call becomes a text
@@ -101,7 +104,8 @@ Local runs read `.env`; copy [`.env.example`](.env.example).
 | Var | Purpose |
 |---|---|
 | `GOOGLE_API_KEY` | Gemini — the reasoning model |
-| `GOOGLE_CREDENTIALS_FILE_PATH` | Service-account JSON: Cloud STT/TTS + Calendar |
+| `GOOGLE_CREDENTIALS_JSON` | Service-account key inline, on one line. Wins over the path |
+| `GOOGLE_CREDENTIALS_FILE_PATH` | The same key as a file: Cloud STT/TTS + Calendar |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Your LiveKit server |
 | `TELNYX_API_KEY` / `TELNYX_FROM_NUMBER` | The confirmation text. Unset ⇒ printed, not sent |
 | `RECEPTIONIST_CALENDAR_IDS` | JSON map `profile_id → Google Calendar ID`; omitted ⇒ fake |

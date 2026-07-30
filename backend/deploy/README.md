@@ -19,15 +19,24 @@ that needs to be reachable — and it genuinely does, because the link in the te
 useless if a phone can't open it.
 
 ```
-deploy/
-  README.md                     <- you are here
-  docker-compose.yml            worker + web + one-shot SIP provisioning
-  docker-compose.livekit.yml    a throwaway local LiveKit, for dev only
-  livekit.yaml                  its config (trivial committed key — dev only)
-  sip/
-    numbers.json                THE routing table: DID -> profile
-    provision.py                applies it to LiveKit; idempotent
+backend/
+  docker-compose.yaml           worker + web + one-shot SIP provisioning
+  deploy/
+    README.md                   <- you are here
+    docker-compose.livekit.yml  a throwaway local LiveKit, for dev only
+    livekit.yaml                its config (trivial committed key — dev only)
+    sip/
+      numbers.json              THE routing table: DID -> profile
+      provision.py              applies it to LiveKit; idempotent
 ```
+
+The deployed compose file lives beside the Dockerfile, not in here, because Compose
+resolves `context:` against the **project directory** — which defaults to the compose
+file's own folder locally but which a platform sets for you. Coolify pins it to the
+configured base directory, so a compose file in `deploy/` saying `context: ..` builds
+correctly by hand and one level too high there, failing with
+`open Dockerfile: no such file or directory`. Keeping it at `backend/` makes both agree.
+The dev-only LiveKit stack stays here: no platform ever runs it.
 
 ## Prerequisites
 
@@ -47,31 +56,43 @@ No `lk` CLI needed — SIP is provisioned by `deploy/sip/provision.py`, which us
 
 ```bash
 cd backend
-docker compose -f deploy/docker-compose.yml up -d --build
+docker compose up -d --build
 
-docker compose -f deploy/docker-compose.yml logs -f
-docker compose -f deploy/docker-compose.yml down
+docker compose logs -f
+docker compose down
 ```
 
-Every setting comes from `backend/.env`, which each service loads directly. Nothing in the
-compose file is interpolated, so no `--env-file` and no shell variables are needed.
+No `-f` and no `--env-file`: the file is at the default location and nothing in it is
+interpolated. Every setting comes from `backend/.env`, which each service loads directly.
 
-### The service-account JSON is yours to mount
+### Credentials: one variable, no mount
 
-Compose does not touch it. Put the file into the container however the host prefers — a
-Coolify file mount, a bind mount added in the platform UI, an image layer on a private
-registry — then set `GOOGLE_CREDENTIALS_FILE_PATH` to the path **inside the container**,
-not the host path.
+Set **`GOOGLE_CREDENTIALS_JSON`** to the whole service-account key on a single line.
+Nothing is mounted and no file has to exist in the container.
 
-That split is deliberate. The compose file once interpolated the host path into a bind
-mount, which Coolify refuses outright: its validator rejects variable substitution in a
-volume source as a command-injection risk, so the whole deploy fails to parse. Keeping the
-mount out means the same file works on a laptop and on a platform without edits.
+```bash
+jq -c . < service-account.json      # what to paste
+```
 
-Both consumers want a readable file at that path — `Credentials.from_service_account_file`
-in `services/google_calendar.py` and `credentials_file=` for STT/TTS in `agent/providers.py`.
-The container runs as UID 10001, so the file has to be readable by that user, and the path
-must avoid `/app` and `/data`, which the image and the `calls` volume already occupy.
+That is the deploy channel because a path is not always mountable. Coolify rejects variable
+substitution in a compose volume source outright — the usual `${CREDS}:/secrets/sa.json`
+recipe cannot even be expressed — and its single-file mounts have their own long-standing
+bug ([#8107](https://github.com/coollabsio/coolify/issues/8107),
+[#3375](https://github.com/coollabsio/coolify/issues/3375)). A variable sidesteps all of it.
+
+`GOOGLE_CREDENTIALS_FILE_PATH` still works and is the easier one locally, where the file is
+just sitting there. **Inline wins if both are set** — otherwise setting the variable on a
+platform would appear to do nothing while a stale `.env` path quietly took precedence. Bad
+JSON raises instead of falling back, for the same reason.
+
+Two notes if you do mount a file anyway: compose will not do it for you, so the path must
+be one you created inside the container, and the image runs as UID 10001, so that user has
+to be able to read it.
+
+In `.env`, leave the JSON **unquoted or single-quoted**. Double quotes break it, and they
+break it quietly: the key's own quote characters end the value early, python-dotenv fails
+to parse the line, and the variable is simply absent — no error, just credentials that
+never arrive. That is the most common way this fails locally.
 
 Three settings have to agree across the two services, and `.env` is what makes them:
 
@@ -105,20 +126,24 @@ Deploy the same image twice next to your LiveKit stack — once with
 and expose a domain for the web one only. Scale the worker by adding replicas; one worker
 handles several concurrent calls.
 
-The compose file works unmodified under the Docker Compose build pack. `env_file: ../.env`
-is marked `required: false`, so its absence from the clone — `.env` is gitignored — is
-skipped rather than fatal, and Coolify's own injection supplies the environment instead.
-Set `GOOGLE_CREDENTIALS_FILE_PATH` in the UI to the in-container path of whatever mount you
-add, and set the compose location to `/backend/deploy/docker-compose.yml` — Coolify's field
-defaults to `.yaml`, which does not match this repo.
+The compose file works unmodified under the Docker Compose build pack. Two settings:
 
-Two Coolify behaviours worth knowing before you debug something else: it injects every
-variable into every container in a compose project regardless of which service declared it
-([#7655](https://github.com/coollabsio/coolify/issues/7655)), and mounting a *single file*
-through the Storage UI has a long-standing bug where the source is created as a directory
-([#8107](https://github.com/coollabsio/coolify/issues/8107),
-[#3375](https://github.com/coollabsio/coolify/issues/3375)) — the workaround is Storages →
-find the directory mount → convert to file → paste contents → redeploy.
+| field | value |
+|---|---|
+| Base Directory | `/backend` |
+| Docker Compose Location | `/backend/docker-compose.yaml` |
+
+Those two must agree, because Coolify passes the base directory as Compose's
+`--project-directory`, and every relative path in the compose file resolves against it.
+That is why the file lives at `backend/` rather than `backend/deploy/`.
+
+Then add `GOOGLE_CREDENTIALS_JSON` and the rest as environment variables. `env_file: .env`
+is marked `required: false`, so its absence from the clone — `.env` is gitignored — is
+skipped rather than fatal, and Coolify's injection supplies the environment instead.
+
+One behaviour worth knowing before you debug something else: Coolify injects every variable
+into every container in a compose project, regardless of which service declared it
+([#7655](https://github.com/coollabsio/coolify/issues/7655)).
 
 ## 2. SIP: one DID per profile
 

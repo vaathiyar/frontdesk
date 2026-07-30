@@ -3,9 +3,10 @@
 Only profiles with a calendar ID in `RECEPTIONIST_CALENDAR_IDS` use this; everything
 else stays on the fake, so local testing needs no calendar setup.
 
-Auth is a **service account**: point `GOOGLE_CREDENTIALS_FILE_PATH` at its JSON key,
-enable the Calendar API on it, and share each calendar with the service account's
-email as "Make changes to events" — otherwise writes 403.
+Auth is a **service account**: supply its key as `GOOGLE_CREDENTIALS_JSON` or point
+`GOOGLE_CREDENTIALS_FILE_PATH` at the file, enable the Calendar API on it, and share each
+calendar with the service account's email as "Make changes to events" — otherwise writes
+403.
 
 Every googleapiclient call is blocking, so each `.execute()` runs in a thread; a
 stalled HTTP round-trip must not freeze the voice loop mid-sentence.
@@ -19,6 +20,7 @@ from typing import Any
 
 from dateutil import parser as dateparser
 
+from receptionist.google_auth import service_account_credentials
 from receptionist.services.calendar import (
     APPOINTMENT_MINUTES,
     CLOSE_HOUR,
@@ -36,19 +38,18 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 def _build_client() -> Any:
     """Vendor imports stay local so importing this module doesn't pull in
-    googleapiclient/google-auth for callers that only need the fake."""
-    creds_path = settings.google_credentials_file_path
-    if not creds_path:
+    googleapiclient for callers that only need the fake."""
+    credentials = service_account_credentials(SCOPES)
+    if credentials is None:
         raise RuntimeError(
             "RECEPTIONIST_CALENDAR_IDS names a real Google Calendar, so "
-            "GOOGLE_CREDENTIALS_FILE_PATH must point at a service-account JSON with the "
-            "Calendar API enabled — or unset RECEPTIONIST_CALENDAR_IDS to use the fake."
+            "GOOGLE_CREDENTIALS_JSON must hold a service-account JSON with the Calendar "
+            "API enabled (or GOOGLE_CREDENTIALS_FILE_PATH point at one) — or unset "
+            "RECEPTIONIST_CALENDAR_IDS to use the fake."
         )
 
-    from google.oauth2.service_account import Credentials
     from googleapiclient.discovery import build
 
-    credentials = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
 

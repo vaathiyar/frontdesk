@@ -71,7 +71,7 @@ async def call(profile_id: str, caller_number: str, fake_calendar: bool) -> None
         except Exception as exc:
             print(f"\n[error] {type(exc).__name__}: {exc}")
             if _looks_like_bad_credentials(exc):
-                print("[hint] check GOOGLE_API_KEY / GOOGLE_CREDENTIALS_FILE_PATH in .env")
+                print("[hint] check GOOGLE_API_KEY / GOOGLE_CREDENTIALS_* in .env")
             return
         if chat.over:
             print("\n  [the agent ended the call]")

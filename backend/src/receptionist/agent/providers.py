@@ -16,7 +16,7 @@ from typing import Any
 
 from livekit.plugins import google, silero
 
-from receptionist.settings import settings
+from receptionist.google_auth import credential_kwargs
 
 # Google Cloud Speech-to-Text.
 STT_MODEL = "latest_long"
@@ -29,12 +29,14 @@ TTS_VOICE = "en-US-Chirp3-HD-Charon"
 
 
 def build_stt() -> Any:
+    # `credential_kwargs()` returns {} when nothing is configured, and the empty splat is
+    # what reaches Application Default Credentials. Passing `credentials_file=None`
+    # explicitly does not: livekit counts None as a supplied value.
     return google.STT(
         model=STT_MODEL,
         languages=STT_LANGUAGES,
         location=STT_LOCATION,
-        # Empty means fall back to Application Default Credentials.
-        credentials_file=settings.google_credentials_file_path or None,
+        **credential_kwargs(),
     )
 
 
@@ -42,7 +44,7 @@ def build_tts() -> Any:
     return google.TTS(
         voice_name=TTS_VOICE,
         model_name=TTS_MODEL,
-        credentials_file=settings.google_credentials_file_path or None,
+        **credential_kwargs(),
     )
 
 

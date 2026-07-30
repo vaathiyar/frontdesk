@@ -1,21 +1,28 @@
 # The receptionist: a voice worker and the page its confirmation texts link to.
 #
 #   cd backend
-#   docker compose -f deploy/docker-compose.yml up -d --build
+#   docker compose up -d --build
 #
 # Both services run the same image and share one SQLite volume — the worker writes each
 # finished call, the web process serves the signed link that was texted about it. They
 # must also share RECEPTIONIST_LINK_SECRET, which comes from the environment for both.
+#
+# This file sits beside the Dockerfile, not under deploy/, and every path in it is relative
+# to this directory. That is what makes it portable: Compose resolves `context:` and
+# `env_file:` against the PROJECT DIRECTORY, which defaults here but which a platform sets
+# for you — Coolify pins it to the configured base directory. A compose file one level down
+# with `context: ..` resolves correctly on a laptop and one directory too high on Coolify,
+# which fails the build with "open Dockerfile: no such file or directory".
 
 services:
   worker:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
     image: receptionist
     command: ["uv", "run", "agent.py", "start"]
     env_file:
-      - path: ../.env
+      - path: .env
         required: false
     volumes:
       - calls:/data
@@ -31,7 +38,7 @@ services:
     depends_on: [worker]
     command: ["uv", "run", "python", "deploy/sip/provision.py"]
     env_file:
-      - path: ../.env
+      - path: .env
         required: false
     restart: "no"
 
@@ -40,7 +47,7 @@ services:
     depends_on: [worker]
     command: ["uv", "run", "serve.py"]
     env_file:
-      - path: ../.env
+      - path: .env
         required: false
     environment:
       # 127.0.0.1 is the right default when run locally, but inside a container it makes
