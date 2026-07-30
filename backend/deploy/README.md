@@ -47,17 +47,23 @@ No `lk` CLI needed — SIP is provisioned by `deploy/sip/provision.py`, which us
 
 ```bash
 cd backend
-SA_JSON=/abs/path/to/service-account.json \
-  docker compose -f deploy/docker-compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 
-docker compose -f deploy/docker-compose.yml logs -f
-docker compose -f deploy/docker-compose.yml down
+docker compose --env-file .env -f deploy/docker-compose.yml logs -f
+docker compose --env-file .env -f deploy/docker-compose.yml down
 ```
 
-Everything except the credential path goes in `backend/.env`. `SA_JSON` is required and
-points at the service-account JSON **on the host**; compose mounts it read-only at
-`/secrets/sa.json` and sets `GOOGLE_CREDENTIALS_FILE_PATH` to that path. Don't put that
-variable in `.env` — the host path is not the container path.
+Everything goes in `backend/.env`, `GOOGLE_CREDENTIALS_FILE_PATH` included: the service
+account is bind-mounted at the same path inside the container as on the host, so that one
+value is right for both the mount and the app, with nothing to keep in sync. It must be
+**absolute** — a relative path resolves against `deploy/` for the mount source, and Docker
+rejects it outright as a container path.
+
+`--env-file` is not optional, and the reason is a real Compose subtlety: `env_file:` in the
+compose file populates each *container's* environment, while `${...}` in that same file is
+*interpolation*, resolved earlier and only from the shell or `--env-file`. The mount is
+interpolated, so without the flag every command fails with
+`required variable GOOGLE_CREDENTIALS_FILE_PATH is missing a value`.
 
 Three settings have to agree across the two services, and `.env` is what makes them:
 
@@ -88,8 +94,17 @@ Then set `RECEPTIONIST_PUBLIC_BASE_URL` to the tunnel URL **before** placing cal
 
 Deploy the same image twice next to your LiveKit stack — once with
 `uv run agent.py start`, once with `uv run serve.py`. Give both the same volume and env,
-add the service-account JSON as a file mount, and expose a domain for the web one only.
-Scale the worker by adding replicas; one worker handles several concurrent calls.
+put the service-account JSON somewhere on the host and point
+`GOOGLE_CREDENTIALS_FILE_PATH` at that absolute path, and expose a domain for the web one
+only. Scale the worker by adding replicas; one worker handles several concurrent calls.
+
+Under Coolify's Docker Compose build pack the compose file above works unmodified. Coolify
+writes its own `.env` from the UI variables and passes it, which covers interpolation
+without the flag; and `env_file: ../.env` is marked `required: false`, so its absence from
+the clone — `.env` is gitignored — is skipped rather than fatal, with Coolify's injection
+supplying the container environment instead. Set `GOOGLE_CREDENTIALS_FILE_PATH` in the UI
+to the absolute host path of the JSON, clear of `/app` and `/data`, which the image and the
+`calls` volume already occupy.
 
 ## 2. SIP: one DID per profile
 
