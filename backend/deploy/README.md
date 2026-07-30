@@ -47,23 +47,31 @@ No `lk` CLI needed — SIP is provisioned by `deploy/sip/provision.py`, which us
 
 ```bash
 cd backend
-docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml up -d --build
 
-docker compose --env-file .env -f deploy/docker-compose.yml logs -f
-docker compose --env-file .env -f deploy/docker-compose.yml down
+docker compose -f deploy/docker-compose.yml logs -f
+docker compose -f deploy/docker-compose.yml down
 ```
 
-Everything goes in `backend/.env`, `GOOGLE_CREDENTIALS_FILE_PATH` included: the service
-account is bind-mounted at the same path inside the container as on the host, so that one
-value is right for both the mount and the app, with nothing to keep in sync. It must be
-**absolute** — a relative path resolves against `deploy/` for the mount source, and Docker
-rejects it outright as a container path.
+Every setting comes from `backend/.env`, which each service loads directly. Nothing in the
+compose file is interpolated, so no `--env-file` and no shell variables are needed.
 
-`--env-file` is not optional, and the reason is a real Compose subtlety: `env_file:` in the
-compose file populates each *container's* environment, while `${...}` in that same file is
-*interpolation*, resolved earlier and only from the shell or `--env-file`. The mount is
-interpolated, so without the flag every command fails with
-`required variable GOOGLE_CREDENTIALS_FILE_PATH is missing a value`.
+### The service-account JSON is yours to mount
+
+Compose does not touch it. Put the file into the container however the host prefers — a
+Coolify file mount, a bind mount added in the platform UI, an image layer on a private
+registry — then set `GOOGLE_CREDENTIALS_FILE_PATH` to the path **inside the container**,
+not the host path.
+
+That split is deliberate. The compose file once interpolated the host path into a bind
+mount, which Coolify refuses outright: its validator rejects variable substitution in a
+volume source as a command-injection risk, so the whole deploy fails to parse. Keeping the
+mount out means the same file works on a laptop and on a platform without edits.
+
+Both consumers want a readable file at that path — `Credentials.from_service_account_file`
+in `services/google_calendar.py` and `credentials_file=` for STT/TTS in `agent/providers.py`.
+The container runs as UID 10001, so the file has to be readable by that user, and the path
+must avoid `/app` and `/data`, which the image and the `calls` volume already occupy.
 
 Three settings have to agree across the two services, and `.env` is what makes them:
 
@@ -94,17 +102,23 @@ Then set `RECEPTIONIST_PUBLIC_BASE_URL` to the tunnel URL **before** placing cal
 
 Deploy the same image twice next to your LiveKit stack — once with
 `uv run agent.py start`, once with `uv run serve.py`. Give both the same volume and env,
-put the service-account JSON somewhere on the host and point
-`GOOGLE_CREDENTIALS_FILE_PATH` at that absolute path, and expose a domain for the web one
-only. Scale the worker by adding replicas; one worker handles several concurrent calls.
+and expose a domain for the web one only. Scale the worker by adding replicas; one worker
+handles several concurrent calls.
 
-Under Coolify's Docker Compose build pack the compose file above works unmodified. Coolify
-writes its own `.env` from the UI variables and passes it, which covers interpolation
-without the flag; and `env_file: ../.env` is marked `required: false`, so its absence from
-the clone — `.env` is gitignored — is skipped rather than fatal, with Coolify's injection
-supplying the container environment instead. Set `GOOGLE_CREDENTIALS_FILE_PATH` in the UI
-to the absolute host path of the JSON, clear of `/app` and `/data`, which the image and the
-`calls` volume already occupy.
+The compose file works unmodified under the Docker Compose build pack. `env_file: ../.env`
+is marked `required: false`, so its absence from the clone — `.env` is gitignored — is
+skipped rather than fatal, and Coolify's own injection supplies the environment instead.
+Set `GOOGLE_CREDENTIALS_FILE_PATH` in the UI to the in-container path of whatever mount you
+add, and set the compose location to `/backend/deploy/docker-compose.yml` — Coolify's field
+defaults to `.yaml`, which does not match this repo.
+
+Two Coolify behaviours worth knowing before you debug something else: it injects every
+variable into every container in a compose project regardless of which service declared it
+([#7655](https://github.com/coollabsio/coolify/issues/7655)), and mounting a *single file*
+through the Storage UI has a long-standing bug where the source is created as a directory
+([#8107](https://github.com/coollabsio/coolify/issues/8107),
+[#3375](https://github.com/coollabsio/coolify/issues/3375)) — the workaround is Storages →
+find the directory mount → convert to file → paste contents → redeploy.
 
 ## 2. SIP: one DID per profile
 

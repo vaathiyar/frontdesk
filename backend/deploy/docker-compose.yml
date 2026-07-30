@@ -1,11 +1,12 @@
 # The receptionist: a voice worker and the page its confirmation texts link to.
 #
 #   cd backend
-#   docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+#   docker compose -f deploy/docker-compose.yml up -d --build
 #
 # Both services run the same image and share one SQLite volume — the worker writes each
 # finished call, the web process serves the signed link that was texted about it. They
 # must also share RECEPTIONIST_LINK_SECRET, which comes from the environment for both.
+
 services:
   worker:
     build:
@@ -17,9 +18,6 @@ services:
       - path: ../.env
         required: false
     volumes:
-      # Mounted at the same path inside as out, so GOOGLE_CREDENTIALS_FILE_PATH means the
-      # same thing to .env, to this mount and to the app. Read-only: nothing writes it.
-      - ${GOOGLE_CREDENTIALS_FILE_PATH:?}:${GOOGLE_CREDENTIALS_FILE_PATH:?}:ro
       - calls:/data
     # Dials out to LiveKit over a WebSocket; SIP media terminates at LiveKit, not here.
     # No inbound ports, no domain, no health check.

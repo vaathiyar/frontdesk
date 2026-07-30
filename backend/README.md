@@ -69,13 +69,15 @@ console has no echo cancellation, so on speakers the agent interrupts itself.
 ### Docker
 
 ```bash
-SA_JSON=/abs/path/to/service-account.json \
-  docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 Two services from one image: the voice `worker` (dials out, no inbound ports) and `web`
 (serves the page). They share a SQLite volume, because the worker writes each call and the
-web process resolves the link that was texted about it. See
+web process resolves the link that was texted about it.
+
+Compose does not mount the service-account JSON — mount it yourself and set
+`GOOGLE_CREDENTIALS_FILE_PATH` to its path *inside* the container. See
 [`deploy/README.md`](deploy/README.md).
 
 ## How a call becomes a text
