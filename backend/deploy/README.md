@@ -10,13 +10,19 @@ caller dials a DID
       with metadata {"profile_id": "hvac"}
    -> the WORKER picks up the job, reads the profile from that metadata and the
       caller's number from the sip.phoneNumber attribute, and runs the call
-   -> on hang-up it saves the call and texts the caller a link
-   -> the WEB service serves that link
+   -> on hang-up it saves the call and texts the caller a signed link
+   -> that link opens the SPA on CloudFront, which reads the call from the WEB
+      service over JSON
 ```
 
-The worker **dials out** and opens no inbound ports. The web service is the only thing
-that needs to be reachable — and it genuinely does, because the link in the text is
-useless if a phone can't open it.
+The worker **dials out** and opens no inbound ports. The web service is the only part that
+has to be reachable, and it genuinely does: the SPA runs in the caller's browser, so "the
+frontend calls the API" means a phone on a mobile network calls it.
+
+Two origins, deliberately: the SPA is static files on CloudFront, the API is this service.
+That is a cross-origin setup, so the API needs CORS for the CloudFront origin, and
+`RECEPTIONIST_PUBLIC_BASE_URL` must point at **CloudFront** — it is the base the texted
+links are built against, and those links have to open the SPA, not raw JSON.
 
 ```
 backend/
@@ -106,10 +112,25 @@ Model weights (Silero VAD) are baked in at build time, so containers start cold-
 
 ### Putting the web service on the internet
 
-The page is HTTP on port 8000 with no TLS of its own — put it behind whatever already
-terminates TLS for you (Coolify, Caddy, nginx). It serves exactly two routes: `/healthz`
-and `/c/{id}`, and every unauthorised request to the latter returns one identical 404 so
-the response can't be used to discover which call ids exist.
+The API speaks plain HTTP on container port 8000 with no TLS of its own — put it behind
+whatever already terminates TLS for you (Coolify, Caddy, nginx). The SPA is served
+separately by CloudFront and is not this service's problem.
+
+It must be reachable from the public internet, not just from CloudFront: the SPA is
+JavaScript running on the caller's phone, so every request originates from that phone.
+CloudFront never proxies to it.
+
+Every unauthorised read of a call returns one identical 404 — bad token, malformed id,
+unknown call, retired profile all look the same — so responses can't be used to discover
+which call ids exist. Keep that property when the routes move to JSON.
+
+The compose file **exposes** 8000 without publishing it, so a proxy can reach it and the
+open internet cannot. `docker-compose.override.yaml` publishes it on the host for local
+use; Compose merges that automatically for a bare `docker compose up` and skips it when
+`-f` names the main file, which is how a platform runs it. The published default is 8001,
+to stay out of the way of whatever else is already on 8000 — override with
+`WEB_PORT=8010 docker compose up`. The *container* port stays 8000 and can never collide,
+since each container has its own network namespace.
 
 For a quick demo without a domain:
 
@@ -140,6 +161,24 @@ That is why the file lives at `backend/` rather than `backend/deploy/`.
 Then add `GOOGLE_CREDENTIALS_JSON` and the rest as environment variables. `env_file: .env`
 is marked `required: false`, so its absence from the clone — `.env` is gitignored — is
 skipped rather than fatal, and Coolify's injection supplies the environment instead.
+
+**Reaching the API:** assign a domain to the `web` service in the UI and write it as
+`https://api.example.com:8000` — the `:8000` tells Coolify's proxy which *container* port to
+route to; the site still answers on 443.
+
+That domain is **not** what goes in `RECEPTIONIST_PUBLIC_BASE_URL`. Two origins, two jobs:
+
+| variable / setting | points at | why |
+|---|---|---|
+| Coolify domain for `web` | `api.example.com` | where the SPA fetches call data |
+| `RECEPTIONIST_PUBLIC_BASE_URL` | the CloudFront origin | it builds the texted link, which must open the SPA — a caller tapping it should not land on raw JSON |
+
+Getting these backwards is silent: calls still complete and texts still send, but every
+link opens the API instead of the app.
+
+Do not add `ports:` to reach the API instead. That binds the port on the server outside the
+proxy, so it is served without TLS, and it fails outright when anything else already holds
+the port — `Bind for 0.0.0.0:8000 failed: port is already allocated`.
 
 One behaviour worth knowing before you debug something else: Coolify injects every variable
 into every container in a compose project, regardless of which service declared it

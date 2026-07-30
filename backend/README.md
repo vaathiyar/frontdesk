@@ -50,9 +50,9 @@ agent decline and offer real alternatives — it never claims a booking the tool
 
 | Command | What it does | Needs |
 |---|---|---|
-| `uv run pytest -q` | 122 offline tests | — |
+| `uv run pytest -q` | 145 offline tests | — |
 | `uv run python scripts/chat.py hvac` | Text REPL — type as the caller | `GOOGLE_API_KEY` |
-| `uv run python serve.py` | The call-detail page texts link to | — |
+| `uv run python serve.py` | The call API the SPA reads | — |
 | `uv run agent.py console --text` | Whole voice pipeline, typed | Google (key + JSON) |
 | `uv run agent.py console` | Local mic and speakers | Google (key + JSON) |
 | `uv run agent.py dev` / `start` | Against your LiveKit server | Google + `LIVEKIT_*` |
@@ -73,8 +73,8 @@ docker compose up -d --build
 ```
 
 Two services from one image: the voice `worker` (dials out, no inbound ports) and `web`
-(serves the page). They share a SQLite volume, because the worker writes each call and the
-web process resolves the link that was texted about it.
+(serves the call API). They share a SQLite volume, because the worker writes each call and
+the web process serves the one the texted link refers to.
 
 `docker-compose.yaml` sits here rather than in `deploy/` on purpose: Compose resolves the
 build context against the project directory, which a platform sets for you, so a compose
@@ -90,12 +90,13 @@ For credentials under Docker, set `GOOGLE_CREDENTIALS_JSON` — compose mounts n
 2. Every turn runs the graph. Tools are the only way the agent changes anything, and each
    one records what it did on the `CallRecord`.
 3. On hang-up, `finish.py` composes the text, sends it, and saves the call.
-4. The text carries one short link. `web/page.py` renders the transcript, the decision
-   timeline, and an **Add to Google Calendar** button.
+4. The text carries one short signed link to the SPA. The SPA reads the call over the API
+   and shows the transcript, the decision timeline, and an **Add to Google Calendar**
+   button.
 
 The confirmation text is split by what can be trusted with what: Gemini writes the opening
 sentence or two and is *forbidden* from stating the date or time; the appointment facts and
-the link are rendered from the record. If the model call fails, the facts go out alone.
+the link are built from the record. If the model call fails, the facts go out alone.
 
 ## Environment
 
@@ -165,7 +166,7 @@ To answer a real number with it, add one SIP (trunk, dispatch-rule) pair — see
 
 ```
 agent.py            LiveKit voice worker      (console | dev | start)
-serve.py            the call-detail web page
+serve.py            the call API
 scripts/chat.py     the text REPL
 src/receptionist/
   agent/
@@ -181,7 +182,8 @@ src/receptionist/
     when.py         turning what a caller said about time into datetimes
     sms.py          Telnyx — one POST
     summary.py      composing the confirmation text
-  web/              app.py (routes) + page.py (server-rendered HTML)
+  web/              app.py — the JSON API the SPA reads
+                    (page.py still holds the retired server-rendered view; to be deleted)
   models.py         CallRecord — the one shape everything reads
   store.py          SQLite
   links.py          signed call links + add-to-calendar links

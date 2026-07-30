@@ -16,8 +16,8 @@ registry line.
 ## Repository
 
 ```
-backend/     the agent, the voice worker, the web page, and the dev REPL
-frontend/    a richer "recent calls" dashboard (specced, not built)
+backend/     the agent, the voice worker, the call API, and the dev REPL
+frontend/    a React SPA on CloudFront (specced, not built)
 docs/        lld.md (the design as built), the P0 requirements, config reference
 ```
 
@@ -26,8 +26,9 @@ docs/        lld.md (the design as built), the P0 requirements, config reference
   that were hard to get right.
 - **Config** — every environment variable and where to obtain it:
   [`docs/config.md`](docs/config.md).
-- **Frontend** — the current web page is a single server-rendered call-detail view inside
-  `backend/`. The React dashboard in `docs/frontend_spec.md` is still a plan.
+- **Frontend** — a separate React SPA, deployed to CloudFront and reaching the backend over
+  JSON on its own origin. Not built yet; `docs/frontend_spec.md` has the shape. The backend
+  serves data, never markup.
 
 ## Quickstart
 
