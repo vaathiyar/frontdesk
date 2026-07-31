@@ -17,7 +17,7 @@ from langchain_core.language_models import BaseChatModel
 
 from receptionist.models import CallRecord, Outcome
 from receptionist.profiles import Profile
-from receptionist.services.sms import SmsError, send_sms
+from receptionist.services.sms import SmsError, SmsSkipped, send_sms
 from receptionist.services.summary import compose_sms
 from receptionist.store import CallStore
 
@@ -38,16 +38,19 @@ async def finish_call(
 
     text = await compose_sms(profile, record, model)
     if text:
+        # The text goes out from the number that was dialled, so the caller sees the
+        # business they rang. None off the phone path, where the default takes over.
+        from_number = record.called_number or None
         try:
-            message_id = await send_sms(record.caller_number, text)
+            message_id = await send_sms(record.caller_number, text, from_number)
+        except SmsSkipped as exc:
+            # Expected off the phone path: no credentials, or a number we must not text.
+            record.emit("sms_skipped", str(exc))
         except SmsError as exc:
             logger.warning("could not text %s: %s", record.caller_number, exc)
             record.emit("sms_failed", str(exc))
         else:
-            if message_id:
-                record.emit("sms_sent", f"to {record.caller_number} ({message_id})")
-            else:
-                record.emit("sms_skipped", "no Telnyx credentials for this number")
+            record.emit("sms_sent", f"to {record.caller_number} ({message_id})")
 
     await (store or CallStore()).save(record)
     return text

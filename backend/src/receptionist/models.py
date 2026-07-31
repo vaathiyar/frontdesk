@@ -60,6 +60,7 @@ class CallRecord(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     profile_id: str
     caller_number: str  # from the call itself (SIP caller ID); never asked for
+    called_number: str = ""  # the DID that was dialled; the confirmation text goes out from it
     started_at: datetime = Field(default_factory=_now)
     ended_at: datetime | None = None
     outcome: Outcome | None = None

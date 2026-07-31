@@ -234,14 +234,38 @@ with an `agent_name`, dispatch is explicit and there is no auto-join fallback. C
 
 ## 3. The confirmation text
 
+The text goes out **from the number the caller dialled** — read off the SIP participant's
+`sip.trunkPhoneNumber`, which works because `provision.py` creates one trunk per DID. So a
+caller who rang the HVAC line gets the reply from the HVAC line. `TELNYX_FROM_NUMBER` is
+only the fallback for `console` and REPL runs, where nothing was dialled.
+
+That means **every DID in `sip/numbers.json` must be assigned to a messaging profile**, not
+just one number. Miss one and only that business's texts fail.
+
 Unset Telnyx credentials mean the text is composed and recorded as `sms_skipped` rather
 than sent, which is what keeps the REPL and the tests from messaging anyone. To actually
 send:
 
-1. Buy a number with SMS enabled and **assign it to a messaging profile** in the Telnyx
+1. Buy numbers with SMS enabled and **assign each to a messaging profile** in the Telnyx
    portal. Skipping that step is the common failure: `40300 Forbidden — the from number is
    not assigned to a messaging profile`.
-2. Set `TELNYX_API_KEY` (a V2 key) and `TELNYX_FROM_NUMBER`.
+2. Set `TELNYX_API_KEY` (a V2 key), and `TELNYX_FROM_NUMBER` if you want the non-phone
+   paths to send too.
+
+### When a text doesn't arrive
+
+Every path logs. In the worker log, `receptionist.services.sms` gives you one of:
+
+```
+sms to +1604… not sent: TELNYX_API_KEY is not set          ← never reached Telnyx
+sending sms +16042969870 -> +1604… (128 chars)             ← attempted
+telnyx rejected … -> …: 403 40300 Forbidden: …             ← Telnyx refused
+sms sent +16042969870 -> +1604…: 40017…                    ← accepted
+```
+
+The same reason is stored on the call as an `sms_skipped` / `sms_failed` event, so it also
+shows up in the call's decision timeline rather than only in a log you may have lost. The
+message body is never logged — it carries a signed link.
 
 Canada → Canada on a Canadian long code needs no A2P/10DLC registration. Sending to **US**
 numbers does; a sole-proprietor brand is ~$22 and usually approved same day. `+1 (xxx)

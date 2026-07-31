@@ -97,9 +97,18 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
 
     profile = get_profile(_profile_id(ctx))
-    record = CallRecord(profile_id=profile.id, caller_number=_caller_number(ctx))
+    record = CallRecord(
+        profile_id=profile.id,
+        caller_number=_caller_number(ctx),
+        called_number=_called_number(ctx),
+    )
     call = CallContext(calendar=build_calendar(profile), record=record)
-    logger.info("call started: profile=%s caller=%s", profile.id, record.caller_number)
+    logger.info(
+        "call started: profile=%s caller=%s dialled=%s",
+        profile.id,
+        record.caller_number,
+        record.called_number or "—",
+    )
 
     session = AgentSession(vad=_vad(ctx), stt=build_stt(), tts=build_tts())
 
@@ -161,20 +170,34 @@ def _profile_id(ctx: JobContext) -> str:
     return os.getenv("RECEPTIONIST_PROFILE") or settings.profile
 
 
-def _caller_number(ctx: JobContext) -> str:
-    """The caller's number, which is how reschedule and cancel find their booking and
-    where the confirmation text goes. Absent in `console` mode, which must still run."""
+def _sip_attribute(ctx: JobContext, key: str) -> str:
+    """One attribute off the SIP participant, or "" when there isn't one."""
     try:
         for participant in ctx.room.remote_participants.values():
-            number = participant.attributes.get("sip.phoneNumber")
+            value = participant.attributes.get(key)
             # Must be a real string: in console mode the room is a MagicMock, whose
             # every attribute is truthy, and a mock's repr was ending up on the record
             # as the caller's number.
-            if isinstance(number, str) and number.strip():
-                return number.strip()
+            if isinstance(value, str) and value.strip():
+                return value.strip()
     except Exception:  # pragma: no cover - console mode must never break on this
         pass
-    return "local-console"
+    return ""
+
+
+def _caller_number(ctx: JobContext) -> str:
+    """The caller's number, which is how reschedule and cancel find their booking and
+    where the confirmation text goes. Absent in `console` mode, which must still run."""
+    return _sip_attribute(ctx, "sip.phoneNumber") or "local-console"
+
+
+def _called_number(ctx: JobContext) -> str:
+    """The DID the caller dialled, which the confirmation text is sent *from* — so the
+    caller sees the business they rang rather than an unrelated number.
+
+    One trunk per DID (see deploy/sip/provision.py), so the trunk's number is the dialled
+    one. Empty off the phone path; TELNYX_FROM_NUMBER covers that case."""
+    return _sip_attribute(ctx, "sip.trunkPhoneNumber")
 
 
 def main() -> None:

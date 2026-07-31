@@ -108,7 +108,8 @@ Local runs read `.env`; copy [`.env.example`](.env.example).
 | `GOOGLE_CREDENTIALS_JSON` | Service-account key inline, on one line. Wins over the path |
 | `GOOGLE_CREDENTIALS_FILE_PATH` | The same key as a file: Cloud STT/TTS + Calendar |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Your LiveKit server |
-| `TELNYX_API_KEY` / `TELNYX_FROM_NUMBER` | The confirmation text. Unset ⇒ printed, not sent |
+| `TELNYX_API_KEY` | The confirmation text. Unset ⇒ printed, not sent |
+| `TELNYX_FROM_NUMBER` | Fallback sender. Real calls send from the DID that was dialled |
 | `RECEPTIONIST_CALENDAR_IDS` | JSON map `profile_id → Google Calendar ID`; omitted ⇒ fake |
 | `RECEPTIONIST_TIMEZONE` | Where all booking arithmetic happens |
 | `RECEPTIONIST_PUBLIC_BASE_URL` | Goes into the text, so it must be reachable from a phone |

@@ -17,7 +17,7 @@ service-account JSON as a file.
 | `LIVEKIT_URL` | Your `livekit-server` URL (`wss://…`, or `ws://…` locally) | Your LiveKit deployment |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | LiveKit credentials | Your `livekit-server` key config |
 | `TELNYX_API_KEY` | Sends the confirmation text. **Unset ⇒ the text is composed and printed, not sent** — which is what keeps the REPL and tests from messaging anyone | Telnyx portal → *API Keys* (a V2 key) |
-| `TELNYX_FROM_NUMBER` | The number texts come from, E.164 | Telnyx portal. It **must be assigned to a messaging profile**, or sends fail `40300 Forbidden` |
+| `TELNYX_FROM_NUMBER` | Fallback sender, E.164. Real calls send from the DID that was dialled; this covers `console`/REPL runs | Telnyx portal. Every sending number — each DID included — **must be assigned to a messaging profile**, or sends fail `40300 Forbidden` |
 | `RECEPTIONIST_CALENDAR_IDS` | JSON map `profile_id` → Google Calendar ID. A profile omitted here uses the in-memory fake, so bookings are **not** written to Google. Example: `{"hvac":"abc@group.calendar.google.com"}` | Google Calendar → *Settings → Integrate calendar → Calendar ID*, one per profile |
 | `RECEPTIONIST_TIMEZONE` | IANA timezone all booking arithmetic happens in (default `America/Vancouver`) | You choose |
 | `RECEPTIONIST_PROFILE` | Profile for `agent.py console`/`dev` when there is no SIP metadata (default `hvac`) | `hvac` \| `restaurant` |
