@@ -58,7 +58,7 @@ async def book(
 RESTAURANT = Profile(
     id="restaurant",
     business="Helpdesk Kitchen",
-    greeting="Thanks for calling Helpdesk Kitchen!",
+    greeting="Thanks for calling Helpdesk Kitchen. How can I help you today?",
     does=(
         "You take table reservations. Treat the reservation as the table itself, e.g. "
         "'table for 4'. For parties larger than 8, take a message for the manager "
