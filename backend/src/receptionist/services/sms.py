@@ -20,6 +20,7 @@ import re
 
 import httpx
 
+from receptionist.phone import E164
 from receptionist.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,6 @@ logger = logging.getLogger(__name__)
 TELNYX_MESSAGES = "https://api.telnyx.com/v2/messages"
 TIMEOUT_SECONDS = 10
 
-E164 = re.compile(r"^\+[1-9]\d{7,14}$")
 # +1 (xxx) 555-01xx is reserved for fiction, and the dev REPL's default caller lives
 # there — so a local run can't text a stranger even with real credentials loaded.
 RESERVED_FOR_FICTION = re.compile(r"^\+1\d{3}55501\d{2}$")
@@ -54,10 +54,13 @@ def sender(from_number: str | None = None) -> str:
 
 def skip_reason(to: str, from_number: str | None = None) -> str | None:
     """Why this message cannot go out, or None if it can. Phrased for a log line."""
+    outgoing = sender(from_number)
     if not settings.telnyx_api_key:
         return "TELNYX_API_KEY is not set"
-    if not sender(from_number):
+    if not outgoing:
         return "no from-number: the call supplied none and TELNYX_FROM_NUMBER is not set"
+    if not E164.match(outgoing):
+        return f"from-number {outgoing!r} is not an E.164 number"
     if not E164.match(to):
         return f"{to!r} is not an E.164 number"
     if RESERVED_FOR_FICTION.match(to):

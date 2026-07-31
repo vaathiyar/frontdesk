@@ -33,6 +33,7 @@ from receptionist.agent.providers import build_stt, build_tts, load_vad
 from receptionist.agent.tools import CallContext
 from receptionist.finish import finish_call, summarise
 from receptionist.models import CallRecord
+from receptionist.phone import to_e164
 from receptionist.profiles import Profile, get_profile
 from receptionist.services.calendar import build_calendar
 from receptionist.settings import settings
@@ -187,8 +188,11 @@ def _sip_attribute(ctx: JobContext, key: str) -> str:
 
 def _caller_number(ctx: JobContext) -> str:
     """The caller's number, which is how reschedule and cancel find their booking and
-    where the confirmation text goes. Absent in `console` mode, which must still run."""
-    return _sip_attribute(ctx, "sip.phoneNumber") or "local-console"
+    where the confirmation text goes. Absent in `console` mode, which must still run.
+
+    Normalised here, at the edge: Telnyx hands the caller ID over as bare digits with no
+    `+`, and this value is matched exactly against what a previous call stored."""
+    return to_e164(_sip_attribute(ctx, "sip.phoneNumber")) or "local-console"
 
 
 def _called_number(ctx: JobContext) -> str:
@@ -197,7 +201,7 @@ def _called_number(ctx: JobContext) -> str:
 
     One trunk per DID (see deploy/sip/provision.py), so the trunk's number is the dialled
     one. Empty off the phone path; TELNYX_FROM_NUMBER covers that case."""
-    return _sip_attribute(ctx, "sip.trunkPhoneNumber")
+    return to_e164(_sip_attribute(ctx, "sip.trunkPhoneNumber"))
 
 
 def main() -> None:
