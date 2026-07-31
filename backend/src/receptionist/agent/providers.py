@@ -25,7 +25,7 @@ STT_LANGUAGES = ["en-US"]
 
 # Google Cloud Text-to-Speech. Chirp3-HD is set through `model_name`, not `model`.
 TTS_MODEL = "chirp_3"
-TTS_VOICE = "en-US-Chirp3-HD-Charon"
+TTS_VOICE = "en-US-Chirp3-HD-Zephyr"
 
 
 def build_stt() -> Any:
