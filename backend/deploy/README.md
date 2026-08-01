@@ -143,7 +143,7 @@ Then set `RECEPTIONIST_PUBLIC_BASE_URL` to the tunnel URL **before** placing cal
 ### On Coolify
 
 Deploy the same image twice next to your LiveKit stack — once with
-`uv run agent.py start`, once with `uv run serve.py`. Give both the same volume and env,
+`uv run agent.py start`, once with `uv run fastapi run`. Give both the same volume and env,
 and expose a domain for the web one only. Scale the worker by adding replicas; one worker
 handles several concurrent calls.
 
@@ -230,34 +230,34 @@ with an `agent_name`, dispatch is explicit and there is no auto-join fallback. C
 > `agent_name`, joining a room does *not* summon it — a dispatch rule (or an explicit
 > dispatch) must ask for it by name. That is what lets one worker serve several DIDs as
 > different businesses, but it also means `agent.py dev` plus a browser will sit idle
-> until something dispatches. Use `agent.py console` to exercise audio without SIP.
+> until something dispatches — and a job that arrives without a `profile_id` in its
+> metadata is refused rather than answered as a guessed business.
 
 ## 3. The confirmation text
 
 The text goes out **from the number the caller dialled** — read off the SIP participant's
 `sip.trunkPhoneNumber`, which works because `provision.py` creates one trunk per DID. So a
 caller who rang the HVAC line gets the reply from the HVAC line. `TELNYX_FROM_NUMBER` is
-only the fallback for `console` and REPL runs, where nothing was dialled.
+only the fallback for a call that supplied no dialled number.
 
 That means **every DID in `sip/numbers.json` must be assigned to a messaging profile**, not
 just one number. Miss one and only that business's texts fail.
 
-Unset Telnyx credentials mean the text is composed and recorded as `sms_skipped` rather
-than sent, which is what keeps the REPL and the tests from messaging anyone. To actually
-send:
+`TELNYX_API_KEY` is checked at startup: the worker will not register without it. To send
+for real:
 
 1. Buy numbers with SMS enabled and **assign each to a messaging profile** in the Telnyx
    portal. Skipping that step is the common failure: `40300 Forbidden — the from number is
    not assigned to a messaging profile`.
-2. Set `TELNYX_API_KEY` (a V2 key), and `TELNYX_FROM_NUMBER` if you want the non-phone
-   paths to send too.
+2. Set `TELNYX_API_KEY` (a V2 key). `TELNYX_FROM_NUMBER` is optional — it only covers a
+   call that supplied no dialled number — but must be E.164 if you set it.
 
 ### When a text doesn't arrive
 
-Every path logs. In the worker log, `receptionist.services.sms` gives you one of:
+Every path logs. In the worker log, `receptionist.messaging.telnyx` gives you one of:
 
 ```
-sms to +1604… not sent: TELNYX_API_KEY is not set          ← never reached Telnyx
+sms to +1604… not sent: '' is not an E.164 number          ← never reached Telnyx
 sending sms +16042969870 -> +1604… (128 chars)             ← attempted
 telnyx rejected … -> …: 403 40300 Forbidden: …             ← Telnyx refused
 sms sent +16042969870 -> +1604…: 40017…                    ← accepted
@@ -290,8 +290,8 @@ docker compose -f deploy/docker-compose.livekit.yml down
 
 Host networking, so SIP signalling (5060) and the RTP range are reachable. A browser on
 Windows hitting a WSL2 container gets TCP localhost forwarding but not the UDP range, so
-media would fall back to ICE/TCP on 7881 — untested. `agent.py console` remains the
-reliable way to hear the agent.
+media would fall back to ICE/TCP on 7881 — untested. Placing a real call through a
+provisioned DID is the reliable way to hear the agent.
 
 ## References
 

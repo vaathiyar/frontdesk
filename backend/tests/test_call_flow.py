@@ -1,19 +1,19 @@
 """What the agent does on a call, driven end to end through the graph.
 
-Every test here scripts the model's replies (see `tests/fakes.py`) and then checks the
-`CallRecord` — the one artefact the confirmation text, the store and the web page all
-read. Nothing here is mocked below the model: the real tools run against the real
-in-memory calendar, so a booking that "happened" actually took a slot.
+Every test here scripts the model's replies (see `tests/support/fakes.py`) and then checks the
+`CallRecord` — the one artefact the confirmation text and the store both read. Nothing
+here is mocked below the model: the real tools run against the in-memory calendar, so a
+booking that "happened" actually took a slot.
 """
 
 from __future__ import annotations
 
-from receptionist.agent.graph import Conversation
-from receptionist.agent.prompt import render
-from receptionist.models import CallRecord, Outcome
-from receptionist.profiles import get_profile
-from receptionist.services.calendar import FakeCalendarService
-from tests.fakes import CALLER, ScriptedModel, calls, says
+from receptionist.core.models import CallRecord, Outcome
+from receptionist.worker.agent.prompt import render
+from receptionist.worker.profiles import get_profile
+from tests.support.conversation import Conversation
+from tests.support.fake_calendar import FakeCalendarService
+from tests.support.fakes import CALLER, ScriptedModel, calls, says
 
 
 def dial(profile_id: str, model: ScriptedModel, calendar: FakeCalendarService) -> Conversation:

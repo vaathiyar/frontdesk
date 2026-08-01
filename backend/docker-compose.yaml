@@ -1,10 +1,10 @@
-# The receptionist: a voice worker and the page its confirmation texts link to.
+# The receptionist: a voice worker and the web process its confirmation links point at.
 #
 #   cd backend
 #   docker compose up -d --build
 #
 # Both services run the same image and share one SQLite volume — the worker writes each
-# finished call, the web process serves the signed link that was texted about it. They
+# finished call, the web process is what serves it back. They
 # must also share RECEPTIONIST_LINK_SECRET, which comes from the environment for both.
 #
 # This file sits beside the Dockerfile, not under deploy/, and every path in it is relative
@@ -45,15 +45,12 @@ services:
   web:
     image: receptionist
     depends_on: [worker]
-    command: ["uv", "run", "serve.py"]
+    # `fastapi run` reads the app from [tool.fastapi] in pyproject.toml and binds
+    # 0.0.0.0:8000, which is what a container needs. (`fastapi dev` binds 127.0.0.1.)
+    command: ["uv", "run", "fastapi", "run"]
     env_file:
       - path: .env
         required: false
-    environment:
-      # 127.0.0.1 is the right default when run locally, but inside a container it makes
-      # the server unreachable from outside it.
-      HOST: 0.0.0.0
-      PORT: 8000
     # `expose`, not `ports`: the container port is declared, but nothing is bound on the
     # host. A platform proxy reaches it over the internal network, and assigning a domain
     # is what publishes it. Binding the host here instead would sit outside that proxy —

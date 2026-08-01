@@ -5,11 +5,12 @@ The booking guarantees themselves live in `tests/test_call_flow.py`.
 
 from __future__ import annotations
 
-from receptionist.agent.graph import STUCK, Conversation
-from receptionist.models import CallRecord
-from receptionist.profiles import get_profile
-from receptionist.services.calendar import FakeCalendarService
-from tests.fakes import CALLER, ScriptedModel, calls, says
+from receptionist.core.models import CallRecord
+from receptionist.worker.agent.graph import STUCK
+from receptionist.worker.profiles import get_profile
+from tests.support.conversation import Conversation
+from tests.support.fake_calendar import FakeCalendarService
+from tests.support.fakes import CALLER, ScriptedModel, calls, says
 
 
 def _hvac(model: ScriptedModel, calendar: FakeCalendarService) -> Conversation:

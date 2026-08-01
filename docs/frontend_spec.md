@@ -6,7 +6,7 @@
 >
 > **Source of truth for every shape below is the backend, not this doc:**
 > `backend/src/receptionist/core/models.py` (`CallRecord` & friends),
-> `core/links.py` (signed links), `profiles/*.py` (business names / captured fields).
+> `worker/lib/links.py` (signed links), `worker/profiles/*.py` (captured fields).
 > Where `lld.md` disagrees with that code, the code wins — see
 > [§9 Consistency with the LLD](#9-consistency-with-the-lld).
 
@@ -22,7 +22,7 @@
 
 **Non-goals (deliberately out of scope)**
 - **Recording playback.** `recording_url` is always `null` today → a *disabled* player placeholder. When a URL later appears the placeholder swaps to `<audio>` with **no contract change**.
-- **Auth / login / accounts.** The only access control is the **signed link** (detail) — HMAC, no expiry, per `links.py`. The dashboard is a **public demo surface** (see the open decision on gating it in `frontend_plan.md`).
+- **Auth / login / accounts.** The only access control is the **signed link** (detail) — HMAC, no expiry, per `worker/lib/links.py`. The dashboard is a **public demo surface** (see the open decision on gating it in `frontend_plan.md`).
 - **Any write path.** Both surfaces are strictly read-only views of `CallRecord`.
 - **Urgency-tier UI.** Urgency is deferred in the engine (`lld.md` §1); the timeline simply renders whatever events the code emits.
 - Not a production analytics dashboard — PoC-sized, favouring a polished demo over feature breadth.
@@ -155,7 +155,7 @@ Data comes from the **list item** (`CallListItem`, §7.2), not the full record.
 | **CallHeader → BusinessTitle** (`<h1>`) | `business_name` (server-derived from `profile_id`). |
 | **CallHeader → OutcomeBadge** | `outcome` (null → "In progress" / LIVE, see §6.3). |
 | **CallHeader → MetaLine** | `caller_number` + `started_at` (`<time>`) + **Duration** = `ended_at − started_at` as `<time datetime="PT4M12S">4:12</time>`, or "In progress" when `ended_at == null`. |
-| **ShareLinkDisplay** | current URL (`id` + `t`). Read-only field + **Copy link**. Surfaces the stable, non-expiring link owners can revisit (per `links.py`). |
+| **ShareLinkDisplay** | current URL (`id` + `t`). Read-only field + **Copy link**. Surfaces the stable, non-expiring link owners can revisit (per `worker/lib/links.py`). |
 | **AudioPlayerPlaceholder** | `recording_url`. Null → **disabled** transport + "Recording coming soon". Non-null later → `<audio controls src={recording_url}>`, no other layout change. |
 | **Transcript** (`<section>`, `<ol>`) | `transcript: TranscriptTurn[]`. Each turn: `role` (humanized: caller→"Caller", agent→"Agent", unknown→humanized) as a **speaker label** + `text` + optional `ts` (`<time>`). Caller vs Agent differ by **label + alignment/tint**, never colour alone. |
 | **DecisionTimeline** (`<section>`, `<ol>`, chronological) | `events: CallEvent[]`. Each row: `humanize(type)` (label + icon) + `summary` + `ts`. Sub-caption "recorded automatically" frames it as the **code-emitted** trust artifact vs the LLM transcript. |
@@ -171,7 +171,7 @@ Data comes from the **list item** (`CallListItem`, §7.2), not the full record.
 - **In-progress** (`ended_at == null && outcome == null`) — "In progress" LIVE badge, running duration, transcript/timeline may still be growing; BookingCard hidden until a booking exists.
 - **Partial / edge data** — `booking == null` → hide BookingCard. `fields == []` → "No details captured." `events == []` → "No recorded actions." `transcript == []` → "Transcript unavailable." `ended_at != null && outcome == null` → neutral "Completed — no outcome recorded" (defensive; **not** LIVE).
 - **Error (valid token, but API/network failed)** — full-page "Something went wrong loading this call" + **Retry**. **Visibly distinct from the 404** — it admits the call exists, which is fine for an *already-authorized* viewer.
-- **Invalid / missing token → 404 (security-critical)** — one **identical** page + HTTP 404 for **every** failure mode: missing `t`, malformed `t`, wrong `t`, unknown `id`, and valid `id` + wrong token. It reveals **nothing** — no business name, no caller number, no "exists but denied". This uniformity is the point: the response must not be an oracle for enumerating call `id`s (it mirrors the constant-time `hmac.compare_digest` in `links.py`).
+- **Invalid / missing token → 404 (security-critical)** — one **identical** page + HTTP 404 for **every** failure mode: missing `t`, malformed `t`, wrong `t`, unknown `id`, and valid `id` + wrong token. It reveals **nothing** — no business name, no caller number, no "exists but denied". This uniformity is the point: the response must not be an oracle for enumerating call `id`s (it mirrors the constant-time `hmac.compare_digest` in `worker/lib/links.py`).
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -375,7 +375,7 @@ This spec is consistent with `lld.md` except for the following **explicit refine
 | # | `lld.md` says | This spec / the code | Why |
 |---|---|---|---|
 | 1 | §5 `Booking` has `start`/`end` datetimes | `Booking` is `{ service, slot: str, calendar_event_id, fields[] }` — a **single human-readable `slot`** | `core/models.py` is the shipped contract; there are no `start`/`end` fields. Time UIs just display the `slot` string. |
-| 2 | §4 SPA nested at `src/receptionist/web/frontend/` | Top-level **`frontend/` sibling of `backend/`** | Root `README` already anticipates this; keeps the Node/TS toolchain out of the Python wheel. FastAPI can still serve `../frontend/dist`. |
+| 2 | §4 SPA nested under the backend package | Top-level **`frontend/` sibling of `backend/`** | Root `README` already anticipates this; keeps the Node/TS toolchain out of the Python wheel. FastAPI can still serve `../frontend/dist`. |
 | 3 | §6 per-profile `booking_fields()` (e.g. HVAC has `day_window`) | Actual keys differ per profile; message-taking adds `name/reason` | Captured fields are **dynamic** — the UI renders them generically, never a fixed schema. |
 | 4 | §5 `CallRepository.list_recent(limit)` | The dashboard needs `before`/`since` + a `/api/stats` aggregate | Small backend extension flagged in §7. |
 | 5 | §8 persist in a **session-close** hook | The **in-progress / LIVE** row needs a record saved **at call-start** (updated at close) | Otherwise every row arrives already-completed (still a fine "streaming" demo, but no live timer). Flagged as a backend dependency. |

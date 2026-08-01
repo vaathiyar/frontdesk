@@ -9,10 +9,10 @@ from __future__ import annotations
 import pytest
 from langchain_core.tools import BaseTool
 
-from receptionist.agent.graph import build_graph
-from receptionist.agent.prompt import render
-from receptionist.profiles import PROFILES, Profile, UnknownProfile, get_profile
-from tests.fakes import ScriptedModel
+from receptionist.worker.agent.graph import build_graph
+from receptionist.worker.agent.prompt import render
+from receptionist.worker.profiles import PROFILES, Profile, UnknownProfile, get_profile
+from tests.support.fakes import ScriptedModel
 
 PROFILE_IDS = list(PROFILES)
 

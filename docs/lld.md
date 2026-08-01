@@ -33,26 +33,65 @@ call recording, and a dashboard.
  caller ─dials DID─▶ LiveKit ─dispatch {profile_id}─▶ agent job
                                           │
                                           ▼
-                              agent/worker.py  (LiveKit: VAD ▸ STT ▸ ? ▸ TTS)
+                              worker/voice/session.py (LiveKit: VAD ▸ STT ▸ ? ▸ TTS)
                                           │  llm_node
                                           ▼
-                              agent/graph.py   START ▸ model ▸ (tools ▸ model)* ▸ END
+                        worker/agent/graph.py  START ▸ model ▸ (tools ▸ model)* ▸ END
                                           │
                        ┌──────────────────┼──────────────────┐
                        ▼                  ▼                  ▼
-              CalendarService        CallRecord          finish.py
-              (fake | Google)      (the one shape)     text + persist
+                 worker/booking/     core/models.py    worker/lifecycle.py
+                    (Google)       CallRecord — the     text, then persist
+                                       one shape
                                           │                  │
                                           ▼                  ▼
-                                   store.py (SQLite) ◀── web/ (the linked page)
+                                core/store.py (SQLite) ◀── api/ (the JSON the SPA reads)
 ```
 
-The same graph is driven by `scripts/chat.py` over stdin. **Two drivers, one brain** — what
-you iterate on by typing is what answers the phone.
+The suite drives the same compiled graph by text (`tests/support/conversation.py`), so
+what the tests prove is what answers the phone.
+
+### Two processes, one narrow seam
+
+The tree is organised by **which process owns what**, because the two ship from one image
+but share almost nothing:
+
+```
+worker/      the voice agent   `agent.py start`   voice/ agent/ booking/ messaging/
+                                                   profiles/ lib/ lifecycle.py
+api/         the web service   `fastapi run`      serves finished calls back
+core/        what both speak                      models.py · store.py
+settings.py  the one place that reads the environment
+```
+
+**`core/` is deliberately two modules.** Everything the worker needs beyond them —
+LangGraph, LiveKit, Google Calendar, Telnyx, date parsing, E.164 normalisation — lives
+under `worker/` and is invisible to the web service.
+
+Four things at the top level, and three of them are a process or the seam between them:
+if a module is not in `core/`, exactly one process owns it. `profiles/` sits under
+`worker/` for that reason — a profile carries its agent's tool tuple, so nothing outside
+the worker can touch it.
+
+Inside `worker/`, the same rule applies one level down. `voice/`, `agent/`, `booking/` and
+`messaging/` each own a vendor or a decision; `lib/` holds the three primitives two or
+three of them share (time, phone numbers, Google credentials), with the bar for living
+there being *no domain state* — nothing in it knows what a `CallRecord` or a `Profile` is.
+`lifecycle.py` is the only loose module, and deliberately so: it is the spine that
+coordinates the rest once a call ends.
+
+One thing nearly broke that: `business_name`. The API needs it on every row, and looking
+it up meant importing the profile registry — but a profile carries its agent's tool tuple, so that
+one string costs **188 langchain/langgraph modules and ~600 ms of boot**. The worker
+stamps `CallRecord.business_name` at call start instead, which also makes the record a
+better historical artifact: it shows the name the caller was actually told. A test
+(`tests/ai_generated/test_api.py`) asserts the web process imports none of the agent.
+
+Every package's `__init__.py` says what belongs in it and why.
 
 ---
 
-## 3. The brain (`agent/graph.py`)
+## 3. The brain (`worker/agent/graph.py`)
 
 A hand-written two-node graph, not a prebuilt agent:
 
@@ -93,13 +132,14 @@ a time that isn't open, so the agent cannot double-book even if the model skips 
 ### History is text-only, on purpose
 
 LiveKit replays only spoken turns, so the graph never sees its own prior tool calls. Rather
-than paper over that, the text driver keeps the same text-only history — the two paths are
-then honestly comparable. The one real consequence is that the model can forget it already
-booked, so `save_booking` confirms the existing appointment instead of creating a second.
+than paper over that, the suite's text driver keeps the same text-only history, so what a
+test proves is honestly comparable to a real call. The one real consequence is that the
+model can forget it already booked, so `save_booking` confirms the existing appointment
+instead of creating a second.
 
 ---
 
-## 4. Profiles (`profiles/`)
+## 4. Profiles (`worker/profiles/`)
 
 A profile is **data plus the tools it picks**:
 
@@ -125,7 +165,7 @@ a tool out is how you say this profile can't do that. Two guard tests hold the l
 profile must be able to offer times, book and take a message, and none may list a tool name
 twice (`ToolNode` keys by name, so a duplicate would silently shadow).
 
-`profiles/` imports nothing from `agent/` except the tool functions themselves — the
+`worker/profiles/` imports nothing from `worker/agent/` except the tool functions themselves — the
 description of a business stays independent of the machinery.
 
 ### Where per-business *behaviour* goes
@@ -133,15 +173,19 @@ description of a business stays independent of the machinery.
 Not in `Profile`. Booking policy lives behind `CalendarService`, chosen per profile by
 `build_calendar(profile)`. Business hours already flow that way. When the restaurant needs
 several reservations per slot where HVAC allows one, that is a second `CalendarService`
-implementation — the Protocol and the factory already exist, and nothing above the service
-layer changes.
+implementation — the Protocol and the factory already exist, and nothing above `booking/`
+changes.
+
+A profile with no calendar in `RECEPTIONIST_CALENDAR_IDS` stops the worker at startup
+(`require_calendar_ids`). There is no in-memory fallback in production: discovering a
+missing calendar with a caller on the line is the failure this exists to prevent.
 
 **Known gap:** `save_booking` currently encodes "one booking per caller per call", which is
 HVAC's rule, not the restaurant's. That decision belongs to the calendar too.
 
 ---
 
-## 5. The shared shape (`models.py`)
+## 5. The shared shape (`core/models.py`)
 
 `CallRecord` is produced by the tools and read by the store, the confirmation text and the
 web page — one type, so those four never drift.
@@ -150,6 +194,7 @@ web page — one type, so those four never drift.
 class CallRecord(BaseModel):
     id: UUID
     profile_id: str
+    business_name: str          # stamped at call start; keeps profiles out of the API
     caller_number: str          # from the call itself; never asked for
     started_at / ended_at
     outcome: Outcome | None     # booked | rescheduled | cancelled | answered
@@ -165,9 +210,10 @@ as evidence of what actually happened, as opposed to what the agent said happene
 
 ---
 
-## 6. When a call ends (`finish.py`)
+## 6. When a call ends (`worker/lifecycle.py`)
 
-One place, called by both drivers, so they can't disagree about what a finished call means.
+One place, called by the worker on hang-up and by the suite, so what "finished" means is
+stated once.
 
 1. Stamp `ended_at`; infer the outcome if no tool set one (a caller who spoke and was
    answered is `ANSWERED`, not `ABANDONED` — recording otherwise would misreport the call).
@@ -185,38 +231,47 @@ facts go out alone.
 Other decisions worth knowing:
 
 - **One short link, not a calendar attachment.** A raw Google Calendar URL is 200–419
-  characters — three SMS segments alone. The add-to-calendar button lives on the linked
+  characters — three SMS segments alone. The add-to-calendar button belongs on the linked
   page instead, along with the transcript.
 - **ASCII only.** A single em-dash or emoji flips the message from GSM-7 to UCS-2, cutting
   capacity from 160 characters per segment to 70.
-- **Nothing sent without credentials.** Unset Telnyx config means the text is composed and
-  recorded as `sms_skipped`. `+1 (xxx) 555-01xx` is refused outright — it's the reserved
-  fictional range, and the dev REPL's default caller lives there.
+- **Credentials are a startup concern, not a per-call one.** `TELNYX_API_KEY` is checked
+  by `require_credentials()` before the worker registers, because a text that never goes
+  out is only ever a log line — and by the time one appears, the caller has hung up. What
+  stays per-call is about the call: a withheld number, or `+1 (xxx) 555-01xx`, refused
+  outright as the reserved fictional range the suite's default caller lives in.
 
 ---
 
-## 7. Persistence and the page
+## 7. Persistence and the link
 
 **SQLite**, one file, no infrastructure — but a real file, because the worker and the web
 server are separate processes. An in-memory store would leave every link in every text
 pointing at nothing. The record is stored as JSON: `CallRecord` is already the one shared
 shape and nothing queries inside it.
 
-**`links.py`** signs each link with a truncated HMAC of the call id. 64 bits of secret on
-top of a random UUID is far more than anyone will brute-force to read one appointment, and
-it keeps the whole link inside a single SMS segment. No expiry, deliberately.
+**`worker/lib/links.py`** signs each link with a truncated HMAC of the call id. 64 bits of
+secret on top of a random UUID is far more than anyone will brute-force to read one
+appointment, and it keeps the whole link inside a single SMS segment. No expiry,
+deliberately.
 
-**`web/`** is FastAPI serving one server-rendered page, mobile-first because almost everyone
-arrives from a text on a phone. No JavaScript, no build step. Every way of failing to
-authorise — malformed id, missing token, wrong token, unknown call — returns **one
-identical 404**, so the response can't be used to discover which call ids exist.
+**`api/` is a health check and nothing else right now.** The server-rendered page that used
+to resolve these links has been retired, so a texted link 404s until the JSON API in
+[`frontend_spec.md`](./frontend_spec.md) §7 lands as `api/routes/calls.py`. Nothing about
+the record or the signing changed, so the link starts working the moment it does.
+
+One property that has to survive that move: every way of failing to authorise — malformed
+id, missing token, wrong token, unknown call — must return **one identical 404**, so the
+response can't be used to discover which call ids exist.
 
 ---
 
-## 8. Voice (`agent/worker.py`)
+## 8. Voice (`worker/voice/session.py`)
 
 `llm_node` is the entire integration: LiveKit's history in, the graph's spoken words out.
-No tools are declared here.
+No tools are declared here. `voice/` is kept apart from `agent/` because the two change for
+different reasons — one when telephony changes, the other when the receptionist should
+behave differently.
 
 Filtering that stream is the whole reason for overriding it. Tool results travel it
 alongside the words to speak, so `livekit-plugins-langchain`'s `LLMAdapter` left at its
@@ -235,34 +290,45 @@ Two more hard-won details:
   every call with `RuntimeError: Plugins must be registered on the main thread`.
 - **`end_call` only marks the call over.** The room closes once the agent has stopped
   speaking, because cutting the line mid-goodbye is worse than a caller waiting a beat.
+- **No local no-telephony mode.** A job whose dispatch metadata names no profile is
+  refused, not answered as a guessed business.
 
 ---
 
 ## 9. Testing
 
-`tests/` holds **17 tests that state the guarantees** — the happy path end to end, a taken
+`tests/` holds **21 tests that state the guarantees** — the happy path end to end, a taken
 time being declined, never double-booking, reschedule and cancel, taking a message, a tool
 failure becoming a question rather than dead air, the confirmation facts coming from the
-record, and the signed link plus its uniform 404. Those are the ones to read.
+record, and a profile without a calendar stopping the worker. Those are the ones to read.
 
-`tests/ai_generated/` holds 105 more for coverage: date-parsing tables, the Google Calendar
+`tests/ai_generated/` holds 145 more for coverage: date-parsing tables, the Google Calendar
 adapter against a stub client, SQLite round-trips, URL encoding, schema introspection.
 
-`tests/fakes.py::ScriptedModel` is how the graph runs with no network — it replays scripted
-`AIMessage`s, so any path through the graph is deterministic. Tests drive tools **by name**,
-which is why they doubled as proof that the tool-wiring refactor changed no behaviour.
+`tests/support/` holds the doubles, and none of them ship:
 
-An autouse fixture blanks the Telnyx credentials for every test. `settings` is a
-module-level singleton loaded from `.env`, so on a machine with real credentials any test
-reaching `send_sms` would post for real. The suite must be *incapable* of it.
+- **`ScriptedModel`** replays scripted `AIMessage`s, so any path through the graph is
+  deterministic with no network and no API key. Tests drive tools **by name**, which is why
+  they doubled as proof that the tool-wiring refactor changed no behaviour.
+- **`FakeCalendarService`** is an in-memory calendar built on the same `slot_grid` and the
+  same profile hours as the real one. It lives in the suite precisely because production
+  has no fallback — see §4.
+- **`Conversation`** drives the compiled graph by text, which is how the suite exercises a
+  whole call without LiveKit.
+
+An autouse fixture blanks the Telnyx credentials for every test, and another blanks the
+Google ones. `settings` is a module-level singleton loaded from `.env`, so on a machine with
+real credentials any test reaching `send_sms` would post for real. The suite must be
+*incapable* of it.
 
 ---
 
 ## 10. Deployment
 
-One image, two processes: the voice worker (dials out, no inbound ports) and the web page
-(the only thing that needs to be reachable). They share a SQLite volume and must share
-`RECEPTIONIST_LINK_SECRET`, or every link already texted 404s. Details in
+One image, two processes: the voice worker (`agent.py start`, dials out, no inbound ports)
+and the web process (`fastapi run`, the only thing that needs to be reachable). They share
+a SQLite volume and must share `RECEPTIONIST_LINK_SECRET`, or every link already texted
+404s. Details in
 [`../backend/deploy/README.md`](../backend/deploy/README.md).
 
 The **DID → profile mapping is the SIP dispatch rule's metadata** — that JSON is the whole

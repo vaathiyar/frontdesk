@@ -1,5 +1,5 @@
 # Keep the build context small and secret-free.
-# Shipped: pyproject.toml, uv.lock, src/, agent.py, scripts/, deploy/, .env.example.
+# Shipped: pyproject.toml, uv.lock, src/, agent.py, deploy/, .env.example.
 
 # Virtualenv (host-specific absolute paths) + build/test caches
 .venv/

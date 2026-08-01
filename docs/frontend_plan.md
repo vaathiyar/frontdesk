@@ -9,12 +9,12 @@
 
 ## 0. Grounding facts (from the backend, today)
 
-- The **web/API layer is greenfield** — there is no FastAPI app, no `/api/calls` or `/c/{id}` route, and FastAPI/uvicorn are **not yet dependencies**. The frontend's only fixed contract is `CallRecord` (`core/models.py`), the `sign`/`verify` link scheme (`core/links.py`), and the profile registry. → the frontend develops against **MSW mocks** of the [API contract](./frontend_spec.md#7-api-contract--the-frontendbackend-seam); the backend team implements that contract with `fastapi-bp`.
+- The **web/API layer is greenfield** — the FastAPI app exists but serves only a health check: there is no `/api/calls` and no `/c/{id}` route. The frontend's only fixed contract is `CallRecord` (`core/models.py`), the `sign`/`verify` link scheme (`worker/lib/links.py`), and the profile registry. → the frontend develops against **MSW mocks** of the [API contract](./frontend_spec.md#7-api-contract--the-frontendbackend-seam); the backend team implements that contract with `fastapi-bp`.
 - `core/settings.py` already has **`RECEPTIONIST_PUBLIC_BASE_URL` (default `http://localhost:8000`)** — "the base URL hardlinks are built against" — and `CallRecord.share_path()` returns a **same-host** path `/c/{id}?t=…`. The signed-link design already assumes **one origin** → drives §4.
 - Backend runs on **Python ≥3.11 via `uv`** from `/home/kris/ai/frontdesk/backend` (`uv sync --extra dev`, `uv run pytest`, `uv run python scripts/chat.py hvac`).
 - **`Booking.slot` is a string**, `outcome` is nullable, `recording_url` is always null, captured fields are dynamic — see spec §9. The client mirrors the code, not `lld.md`.
 
-**LLD refinement (explicit):** `lld.md` §4 nests the SPA at `src/receptionist/web/frontend/`. We refine this to a **top-level `frontend/` sibling of `backend/`** (`/home/kris/ai/frontdesk/frontend`) — the root `README` already lists it. FastAPI still *serves* the built assets by pointing `StaticFiles` at `../frontend/dist` (§4).
+**LLD refinement (explicit):** `lld.md` §4 nested the SPA under the backend package. We refine this to a **top-level `frontend/` sibling of `backend/`** (`/home/kris/ai/frontdesk/frontend`) — the root `README` already lists it. FastAPI still *serves* the built assets by pointing `StaticFiles` at `../frontend/dist` (§4).
 
 ---
 
@@ -92,7 +92,7 @@ Co-locate `*.test.tsx` next to the component under test.
 
 Two processes, one logical origin via the dev proxy:
 
-- **Backend** (from `backend/`): `uv run uvicorn receptionist.web.app:app --reload --port 8000` *(module path per `lld.md` §4; confirm with the backend team since it's greenfield)*.
+- **Backend** (from `backend/`): `uv run fastapi dev` *(module path per `lld.md` §4; confirm with the backend team since it's greenfield)*.
 - **Frontend** (from `frontend/`): `npm run dev` → Vite on `:5173`.
 
 **Vite proxy — proxy only `/api`** (`vite.config.ts`):
@@ -118,7 +118,7 @@ npm i @tanstack/react-query react-router-dom lucide-react
 npm i -D tailwindcss @tailwindcss/vite vitest jsdom \
   @testing-library/react @testing-library/jest-dom @testing-library/user-event msw
 npx msw init public/     # dev mocking service worker
-npm run dev              # :5173  (backend: uv run uvicorn … --port 8000)
+npm run dev              # :5173  (backend: uv run fastapi dev)
 ```
 Optional: a root `Makefile`/`concurrently` target to boot both — nice-to-have, two terminals is fine for a PoC.
 
@@ -212,8 +212,8 @@ PoC-sized: a handful of high-value tests per surface. **CI = `tsc --noEmit` + `v
 ## 8. Backend dependencies (hand-off to the `fastapi-bp` team)
 
 The frontend is unblocked by MSW, but the live demo needs the backend to:
-1. **Add FastAPI + uvicorn** and a `web/` package implementing the [API contract](./frontend_spec.md#7-api-contract--the-frontendbackend-seam).
+1. **Add `api/routes/calls.py`** implementing the [API contract](./frontend_spec.md#7-api-contract--the-frontendbackend-seam).
 2. **Extend `CallRepository`** beyond `list_recent(limit)` with `before`/`since` querying and a stats aggregate (trivial for the in-memory store).
 3. **Wire a shared repository instance** into the web app and **actually populate it** — today `scripts/chat.py` builds a `CallRecord` but never `save()`s, and nothing holds a store. For the pitch, seed the store and/or run a demo driver that inserts records so the dashboard visibly streams.
-4. **Verify tokens with `core/links.verify`** and return an **identical 404** for bad-token and unknown-id (no enumeration oracle).
+4. **Verify tokens with `worker/lib/links.verify`** and return an **identical 404** for bad-token and unknown-id (no enumeration oracle).
 5. Serve the built SPA per §4 (StaticFiles + wildcard `index.html` fallback), or deploy the separate-host option if that decision flips.

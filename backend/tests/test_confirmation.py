@@ -9,12 +9,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from receptionist.finish import finish_call
-from receptionist.models import CallRecord
-from receptionist.profiles import get_profile
-from receptionist.services.summary import compose_sms
-from receptionist.store import CallStore
-from tests.fakes import ScriptedModel, says
+from receptionist.core.models import CallRecord
+from receptionist.core.store import CallStore
+from receptionist.worker.lifecycle import finish_call
+from receptionist.worker.messaging.compose import compose_sms
+from receptionist.worker.profiles import get_profile
+from tests.support.fakes import ScriptedModel, says
 
 
 async def test_the_facts_in_the_text_come_from_the_record_not_the_model(

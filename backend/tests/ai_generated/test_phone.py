@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from receptionist.phone import to_e164
+from receptionist.worker.lib.phone import to_e164
 
 
 @pytest.mark.parametrize(

@@ -33,8 +33,8 @@ from livekit.protocol import room as room_pb  # noqa: E402
 from livekit.protocol import sip as sip_pb  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from receptionist.agent.worker import AGENT_NAME  # noqa: E402
-from receptionist.profiles import PROFILES  # noqa: E402
+from receptionist.worker.profiles import PROFILES  # noqa: E402
+from receptionist.worker.voice.session import AGENT_NAME  # noqa: E402
 
 NUMBERS = Path(__file__).parent / "numbers.json"
 

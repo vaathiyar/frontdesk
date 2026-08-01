@@ -2,7 +2,7 @@
 
 App settings are prefixed RECEPTIONIST_; vendor credentials keep their conventional
 names. Model and voice parameters are deliberately NOT here: they live as constants
-next to the code that uses them (graph.py, voice/providers.py).
+next to the code that uses them (worker/agent/graph.py, worker/voice/speech.py).
 """
 
 from __future__ import annotations
@@ -16,31 +16,28 @@ class Settings(BaseSettings):
 
     # Gemini authenticates with the API key. Cloud Speech-to-Text, Text-to-Speech and
     # Calendar authenticate with a service account, given either inline as JSON or as a
-    # path to the key file — inline wins, and google_auth.py explains why.
+    # path to the key file — inline wins, and worker/lib/google_auth.py explains why.
     #
     # The inline one stays a plain `str`, deliberately: as a dict field pydantic-settings
     # would parse it while building this singleton, so one mangled paste would turn
     # `import receptionist.settings` into a ValidationError and take down serve.py, which
-    # never touches Google at all. google_auth.py parses it lazily instead.
+    # never touches Google at all. worker/lib/google_auth.py parses it lazily instead.
     google_api_key: str = Field(default="", validation_alias="GOOGLE_API_KEY")
     google_credentials_json: str = Field(default="", validation_alias="GOOGLE_CREDENTIALS_JSON")
     google_credentials_file_path: str = Field(
         default="", validation_alias="GOOGLE_CREDENTIALS_FILE_PATH"
     )
 
-    # Telnyx sends the confirmation text. Unset ⇒ the SMS is printed instead of sent,
-    # so the REPL and tests never message a real phone.
+    # Telnyx sends the confirmation text. Unset ⇒ the SMS is composed and recorded on the
+    # call as skipped rather than sent, so the tests never message a real phone.
     telnyx_api_key: str = Field(default="", validation_alias="TELNYX_API_KEY")
     telnyx_from_number: str = Field(default="", validation_alias="TELNYX_FROM_NUMBER")
 
-    # profile_id -> Google Calendar ID. A profile listed here books against that real
-    # calendar; anything omitted falls back to the in-memory fake, so local testing
-    # needs zero calendar setup.
+    # profile_id -> Google Calendar ID. Every registered profile needs one: the worker
+    # checks this at startup (`require_calendar_ids`) and refuses to run otherwise, rather
+    # than discovering a missing calendar with a caller on the line.
     calendar_ids: dict[str, str] = {}
     timezone: str = "America/Vancouver"
-
-    # Which profile the local `agent.py console` answers as, absent SIP metadata.
-    profile: str = "hvac"
 
     # Signed call-detail links, and where the SMS points.
     link_secret: str = "dev-insecure-secret-change-me"

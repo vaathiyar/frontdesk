@@ -5,13 +5,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from receptionist.agent.graph import STUCK
-from receptionist.agent.tools import CallContext
-from receptionist.agent.worker import ReceptionistAgent
-from receptionist.models import CallRecord
-from receptionist.profiles import get_profile
-from receptionist.services.calendar import FakeCalendarService
-from tests.fakes import CALLER, ScriptedModel, calls, says
+from receptionist.core.models import CallRecord
+from receptionist.worker.agent.graph import STUCK
+from receptionist.worker.agent.tools import CallContext
+from receptionist.worker.profiles import get_profile
+from receptionist.worker.voice.session import ReceptionistAgent
+from tests.support.fake_calendar import FakeCalendarService
+from tests.support.fakes import CALLER, ScriptedModel, calls, says
 
 
 @dataclass

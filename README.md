@@ -5,10 +5,11 @@ books, reschedules or cancels on the call, answers questions about the business,
 message — then texts the caller a confirmation with a link to the transcript and an
 add-to-calendar button.
 
-**One brain, two drivers.** A LangGraph agent owns the prompt and the tools; a text REPL
-and a LiveKit voice worker both drive that same graph, so what you iterate on by typing is
-what answers the phone. Gemini reasons, Google Cloud does speech, LiveKit carries the call
-(self-hosted `livekit-server` + `livekit-sip`, not LiveKit Cloud), and Telnyx sends the text.
+**One brain.** A LangGraph agent owns the prompt and the tools; the LiveKit voice worker
+drives it on a real call and the test suite drives the same compiled graph by text, so
+what the tests prove is what answers the phone. Gemini reasons, Google Cloud does speech,
+LiveKit carries the call (self-hosted `livekit-server` + `livekit-sip`, not LiveKit
+Cloud), and Telnyx sends the text.
 
 Two profiles ship — HVAC and restaurant — and adding a vertical is one module plus one
 registry line.
@@ -16,7 +17,7 @@ registry line.
 ## Repository
 
 ```
-backend/     the agent, the voice worker, the call API, and the dev REPL
+backend/     the agent, the voice worker, and the web process
 frontend/    a React SPA on CloudFront (specced, not built)
 docs/        lld.md (the design as built), the P0 requirements, config reference
 ```
@@ -35,16 +36,14 @@ docs/        lld.md (the design as built), the P0 requirements, config reference
 ```bash
 cd backend
 uv sync
-uv run pytest -q                                     # 122 tests, offline, no API key
-
-export GOOGLE_API_KEY=...                            # Gemini; or set it in .env
-uv run python scripts/chat.py hvac --fake-calendar   # talk to it, no telephony
+uv run pytest -q     # 166 tests, offline, no network and no API key
 ```
 
-Ask for tomorrow's first opening to watch it decline a taken slot and offer real
-alternatives. `quit` prints the resulting call record and the text it would send.
+The suite is how you exercise the agent without telephony: it drives the real graph and
+the real tools against an in-memory calendar, so a booking that "happened" actually took a
+slot. Start with `tests/test_call_flow.py` — those state the guarantees.
 
-To hear it: `uv run agent.py console` (local mic and speakers, no server needed — wear
-headphones, there's no echo cancellation). For real phone calls and Docker, see
+Every real call arrives over SIP, and the worker needs a Google Calendar configured for
+each profile before it will start. For phone calls and Docker, see
 [`backend/README.md`](backend/README.md) and
 [`backend/deploy/README.md`](backend/deploy/README.md).

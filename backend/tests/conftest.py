@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from receptionist.models import Booking, CallRecord, Outcome
-from receptionist.services.calendar import FakeCalendarService
+from receptionist.core.models import Booking, CallRecord, Outcome
 from receptionist.settings import settings
-from tests.fakes import CALLER, day_after
+from tests.support.fake_calendar import FakeCalendarService
+from tests.support.fakes import CALLER, day_after
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +21,11 @@ def never_text_anyone(monkeypatch: pytest.MonkeyPatch) -> None:
     happened once, to a number invented for a fixture. The suite must be incapable of it,
     not merely unlikely to do it — so this is autouse and not opt-out. A test that needs
     the configured path sets the credentials itself and supplies a stub transport.
+
+    **Blanking the from-number is what now carries that guarantee.** `skip_reason` stopped
+    checking the API key when that check moved to startup (`require_credentials`), so with
+    no sender configured every send is refused before the network — which is the state
+    every test starts in.
     """
     monkeypatch.setattr(settings, "telnyx_api_key", "")
     monkeypatch.setattr(settings, "telnyx_from_number", "")

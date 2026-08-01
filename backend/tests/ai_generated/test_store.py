@@ -9,9 +9,9 @@ from uuid import uuid4
 
 import pytest
 
-from receptionist.models import Booking, CallRecord, Message, Outcome
-from receptionist.store import CallStore
-from tests.fakes import CALLER
+from receptionist.core.models import Booking, CallRecord, Message, Outcome
+from receptionist.core.store import CallStore
+from tests.support.fakes import CALLER
 
 
 @pytest.fixture

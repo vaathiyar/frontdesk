@@ -4,8 +4,8 @@
 #
 #   agent.py start   the LiveKit voice worker — answers calls, dials OUT to LiveKit,
 #                    exposes no ports
-#   serve.py         the call-detail page every confirmation text links to — needs an
-#                    inbound port and a publicly reachable URL
+#   fastapi run      the web process the confirmation links point at — needs an inbound
+#                    port and a publicly reachable URL
 #
 # Both read the same SQLite file, so they must share a volume: the worker writes the
 # call, the web process resolves the link that was texted about it.

@@ -12,12 +12,12 @@ from typing import Any
 
 import pytest
 
-from receptionist.google_auth import (
+from receptionist.settings import Settings, settings
+from receptionist.worker.lib.google_auth import (
     CredentialsError,
     credential_kwargs,
     service_account_credentials,
 )
-from receptionist.settings import Settings, settings
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 KEY = {"type": "service_account", "client_email": "bot@example.iam.gserviceaccount.com"}

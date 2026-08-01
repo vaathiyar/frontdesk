@@ -6,8 +6,8 @@ from datetime import datetime
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
-from receptionist.links import TOKEN_LENGTH, call_url, google_calendar_url, sign, verify
 from receptionist.settings import settings
+from receptionist.worker.lib.links import TOKEN_LENGTH, call_url, google_calendar_url, sign, verify
 
 CALL = uuid4()
 
