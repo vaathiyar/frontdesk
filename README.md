@@ -9,7 +9,7 @@ add-to-calendar button.
 drives it on a real call and the test suite drives the same compiled graph by text, so
 what the tests prove is what answers the phone. Gemini reasons, Google Cloud does speech,
 LiveKit carries the call (self-hosted `livekit-server` + `livekit-sip`, not LiveKit
-Cloud), and Telnyx sends the text.
+Cloud), Telnyx sends the text, and CockroachDB holds the record it points at.
 
 Two profiles ship — HVAC and restaurant — and adding a vertical is one module plus one
 registry line.
@@ -17,8 +17,8 @@ registry line.
 ## Repository
 
 ```
-backend/     the agent, the voice worker, and the web process
-frontend/    a React SPA on CloudFront (specced, not built)
+backend/     the agent, the voice worker, and the JSON API
+frontend/    a React SPA: the landing page, and the call record a texted link opens
 docs/        lld.md (the design as built), the P0 requirements, config reference
 ```
 
@@ -27,16 +27,15 @@ docs/        lld.md (the design as built), the P0 requirements, config reference
   that were hard to get right.
 - **Config** — every environment variable and where to obtain it:
   [`docs/config.md`](docs/config.md).
-- **Frontend** — a separate React SPA, deployed to CloudFront and reaching the backend over
-  JSON on its own origin. Not built yet; `docs/frontend_spec.md` has the shape. The backend
-  serves data, never markup.
+- **Frontend** — a separate React SPA on its own origin, reaching the backend over JSON.
+  The backend serves data, never markup. Start at [`frontend/README.md`](frontend/README.md).
 
 ## Quickstart
 
 ```bash
 cd backend
 uv sync
-uv run pytest -q     # 166 tests, offline, no network and no API key
+uv run pytest -q     # 171 tests, offline: no network, no API key, no database
 ```
 
 The suite is how you exercise the agent without telephony: it drives the real graph and
