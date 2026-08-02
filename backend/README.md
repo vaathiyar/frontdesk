@@ -35,6 +35,7 @@ took a slot.
 | `uv run agent.py dev` / `start` | The voice worker, against your LiveKit server | Google (key + JSON) + `LIVEKIT_*` |
 | `uv run python deploy/sip/provision.py` | Point each DID at the right profile | `LIVEKIT_*` |
 | `uv run alembic upgrade head` | Create/update the `calls` table | `RECEPTIONIST_DATABASE_URL` |
+| `uv run python scripts/seed_call.py --kind all` | Put dummy calls in the database, to exercise the API and the SPA without phoning in | `RECEPTIONIST_DATABASE_URL` |
 
 **Every call arrives over SIP.** The dispatch rule says which business a call is for, so
 there is no local no-telephony mode and no default profile.
@@ -186,6 +187,7 @@ src/receptionist/
     routes/         health.py, calls.py — GET /api/calls/{id} is the whole API
 migrations/         alembic; the calls table's schema history
   settings.py       the one place that reads the environment
+scripts/            dev tooling, outside the package: seed_call.py
 tests/              21 tests that state the guarantees — read these
   support/          test doubles: ScriptedModel, the in-memory calendar and call store
   ai_generated/     147 more for coverage — not required reading
