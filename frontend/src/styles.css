@@ -1,0 +1,270 @@
+@import 'tailwindcss';
+
+/* ---------------------------------------------------------------------------
+   Frontdesk design system
+   ---------------------------------------------------------------------------
+   Subject: telephony + appointment records for trades and restaurants.
+
+   Palette is OKLCH. Neutrals sit on hue 152-162 at very low chroma so the page
+   reads as ledger paper rather than cold gray or the usual warm cream. There is
+   exactly ONE accent -- signal amber -- and it carries exactly one meaning:
+   "the machine did something here". Two further hues are earned, not
+   decorative: confirm (pine) = it landed on the real calendar, alert (rust) =
+   cancelled / declined / failed. Nothing else gets colour.
+
+   Type carries the page's thesis. Archivo (variable width + weight) is used for
+   anything a human said or authored; IBM Plex Mono is used for anything a
+   machine emitted -- timestamps, phone numbers, ids, event types. You can see
+   which is which before you read a word.
+--------------------------------------------------------------------------- */
+
+:root {
+  --paper: oklch(0.978 0.005 150);
+  --plate: oklch(0.995 0.002 150);
+  --sunken: oklch(0.956 0.006 152);
+  --ink: oklch(0.215 0.015 162);
+  --line: oklch(0.9 0.008 152);
+  --rule: oklch(0.828 0.01 152);
+
+  --signal: oklch(0.685 0.148 62);
+  --signal-ink: oklch(0.47 0.12 55);
+  --signal-wash: oklch(0.958 0.033 78);
+
+  --confirm: oklch(0.455 0.095 165);
+  --confirm-mark: oklch(0.53 0.105 165);
+  --confirm-wash: oklch(0.955 0.03 165);
+
+  --alert: oklch(0.47 0.175 27);
+  --alert-mark: oklch(0.545 0.185 27);
+  --alert-wash: oklch(0.962 0.025 30);
+
+  --selection: oklch(0.9 0.075 78);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: oklch(0.178 0.012 162);
+    --plate: oklch(0.218 0.013 162);
+    --sunken: oklch(0.148 0.011 162);
+    --ink: oklch(0.955 0.006 150);
+    --line: oklch(0.305 0.013 162);
+    --rule: oklch(0.42 0.015 162);
+
+    --signal: oklch(0.775 0.145 70);
+    --signal-ink: oklch(0.82 0.13 72);
+    --signal-wash: oklch(0.3 0.045 68);
+
+    --confirm: oklch(0.76 0.105 165);
+    --confirm-mark: oklch(0.72 0.105 165);
+    --confirm-wash: oklch(0.288 0.035 165);
+
+    --alert: oklch(0.7 0.15 28);
+    --alert-mark: oklch(0.66 0.16 28);
+    --alert-wash: oklch(0.302 0.05 28);
+
+    --selection: oklch(0.42 0.09 70);
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-plate: var(--plate);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-line: var(--line);
+  --color-rule: var(--rule);
+
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-signal-wash: var(--signal-wash);
+
+  --color-confirm: var(--confirm);
+  --color-confirm-mark: var(--confirm-mark);
+  --color-confirm-wash: var(--confirm-wash);
+
+  --color-alert: var(--alert);
+  --color-alert-mark: var(--alert-mark);
+  --color-alert-wash: var(--alert-wash);
+}
+
+@theme {
+  --font-sans:
+    'Archivo', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --font-mono:
+    'IBM Plex Mono', ui-monospace, 'SFMono-Regular', 'Roboto Mono', 'Menlo', monospace;
+
+  /* A deliberate scale: dense metadata at the bottom, real editorial range at
+     the top. Line heights tighten as size grows; tracking goes negative. */
+  --text-xs: 0.6875rem;
+  --text-xs--line-height: 1.4;
+  --text-xs--letter-spacing: 0.01em;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem;
+  --text-base--line-height: 1.6;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.3;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 1.2;
+  --text-2xl--letter-spacing: -0.018em;
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 1.1;
+  --text-3xl--letter-spacing: -0.024em;
+  --text-4xl: 3rem;
+  --text-4xl--line-height: 1.02;
+  --text-4xl--letter-spacing: -0.03em;
+  --text-5xl: 4rem;
+  --text-5xl--line-height: 0.96;
+  --text-5xl--letter-spacing: -0.035em;
+  --text-6xl: 5.5rem;
+  --text-6xl--line-height: 0.92;
+  --text-6xl--letter-spacing: -0.04em;
+
+  /* Rectilinear, but not aggressively so. */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+
+  --shadow-plate: 0 1px 0 0 color-mix(in oklab, var(--ink) 6%, transparent);
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Digits must line up in every column of this app. */
+  code,
+  kbd,
+  samp,
+  pre,
+  time,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background-color: var(--selection);
+    color: var(--ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--signal-ink);
+    outline-offset: 2px;
+    border-radius: 1px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* --- Utilities ----------------------------------------------------------- */
+
+/* Small machine-set label. Used for every field name, event type and eyebrow. */
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* The recurring container: a flat plate with a hairline, no elevation theatre. */
+@utility plate {
+  background-color: var(--plate);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+}
+
+/* Diagonal hatching marks the open end of a call that has not finished. */
+@utility hatched {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in oklab, var(--ink) 22%, transparent) 0 1px,
+    transparent 1px 5px
+  );
+}
+
+/* Faint ruling behind the elapsed-time gutter: a dispatcher's day sheet. */
+@utility ruled {
+  background-image: linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(100% - 1px),
+    var(--line) calc(100% - 1px)
+  );
+}
+
+/* Archivo is variable on the width axis; semi-expanded reads as signage. */
+@utility wide-set {
+  font-stretch: 112%;
+}
+
+@utility narrow-set {
+  font-stretch: 92%;
+}
+
+@keyframes frontdesk-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes frontdesk-shimmer {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+@utility live-dot {
+  animation: frontdesk-pulse 2s ease-in-out infinite;
+}
+
+@utility skeleton {
+  background-color: color-mix(in oklab, var(--ink) 9%, transparent);
+  border-radius: var(--radius-xs);
+  animation: frontdesk-shimmer 1.6s ease-in-out infinite;
+}
