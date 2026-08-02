@@ -6,15 +6,13 @@ going out under the business's name is the one error that costs someone a mornin
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from receptionist.core.models import CallRecord
-from receptionist.core.store import CallStore
 from receptionist.worker.lifecycle import finish_call
 from receptionist.worker.messaging.compose import compose_sms
 from receptionist.worker.profiles import get_profile
-from tests.support.fakes import ScriptedModel, says
+from tests.support.fakes import FakeCallStore, ScriptedModel, says
 
 
 async def test_the_facts_in_the_text_come_from_the_record_not_the_model(
@@ -46,11 +44,11 @@ async def test_the_facts_still_go_out_when_the_model_call_fails(
 
 
 async def test_finishing_a_call_saves_it_and_records_whether_the_caller_was_told(
-    booked_record: CallRecord, tmp_path: Path
+    booked_record: CallRecord,
 ) -> None:
     """The saved record is the only evidence the call happened, and the only thing the
     link in the text can resolve to, so sending has to be recorded on it either way."""
-    store = CallStore(tmp_path / "calls.db")
+    store = FakeCallStore()
     model = ScriptedModel(replies=[says("All set.")])
 
     text = await finish_call(get_profile("hvac"), booked_record, store=store, model=model)
@@ -59,4 +57,9 @@ async def test_finishing_a_call_saves_it_and_records_whether_the_caller_was_told
     assert booked_record.ended_at is not None
     # No Telnyx credentials in the test environment, so the send is skipped, not silent.
     assert [e.type for e in booked_record.events] == ["booking_created", "sms_skipped"]
-    assert await store.get(booked_record.id) is not None
+
+    saved = await store.get(booked_record.id)
+    assert saved is not None
+    # Saved AFTER the send was recorded, not before — the whole reason `finish_call`
+    # orders it that way is so the stored call says whether the caller was told.
+    assert [e.type for e in saved.events] == ["booking_created", "sms_skipped"]

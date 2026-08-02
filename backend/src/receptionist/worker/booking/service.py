@@ -87,13 +87,27 @@ def require_calendar_ids(profile_ids: Iterable[str]) -> None:
 
     Checked once at worker startup rather than at the first booking: a caller listening to
     the agent fail mid-sentence is the worst possible place to discover a missing id.
+
+    The keys are matched exactly, so the overwhelmingly likely cause of a failure here is a
+    misspelled profile id. Unrecognised keys are named for that reason — "restaurant is
+    missing" sends you looking at the deployment; "restaurant is missing and you wrote
+    restraunt" is the actual answer. Only keys are shown, never calendar ids.
     """
-    missing = sorted(p for p in profile_ids if not settings.calendar_ids.get(p))
-    if missing:
-        raise CalendarNotConfigured(
-            f"No Google Calendar configured for: {', '.join(missing)}. "
-            "RECEPTIONIST_CALENDAR_IDS must map every registered profile to a calendar id."
-        )
+    wanted = set(profile_ids)
+    missing = sorted(p for p in wanted if not settings.calendar_ids.get(p))
+    if not missing:
+        return
+
+    unknown = sorted(set(settings.calendar_ids) - wanted)
+    hint = (
+        f" It does name {', '.join(unknown)}, which is not a registered profile — "
+        "check the spelling."
+        if unknown
+        else " It must map every registered profile to a calendar id."
+    )
+    raise CalendarNotConfigured(
+        f"RECEPTIONIST_CALENDAR_IDS has no Google Calendar for: {', '.join(missing)}.{hint}"
+    )
 
 
 def build_calendar(profile: Profile) -> CalendarService:

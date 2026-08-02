@@ -1,4 +1,4 @@
-"""Signed call links, and the add-to-calendar link."""
+"""The call link, and the add-to-calendar link."""
 
 from __future__ import annotations
 
@@ -7,37 +7,17 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from receptionist.settings import settings
-from receptionist.worker.lib.links import TOKEN_LENGTH, call_url, google_calendar_url, sign, verify
+from receptionist.worker.lib.links import call_url, google_calendar_url
 
 CALL = uuid4()
 
 
-def test_signing_is_deterministic_and_short_enough_for_one_sms_segment() -> None:
-    assert sign(CALL) == sign(CALL)
-    assert len(sign(CALL)) == TOKEN_LENGTH
-
-
-def test_a_matching_token_verifies() -> None:
-    assert verify(CALL, sign(CALL))
-
-
-def test_a_wrong_token_does_not_verify() -> None:
-    assert not verify(CALL, "0" * TOKEN_LENGTH)
-    assert not verify(CALL, "")
-
-
-def test_a_token_for_another_call_does_not_verify() -> None:
-    assert not verify(CALL, sign(uuid4()))
-
-
-def test_a_different_secret_invalidates_the_token() -> None:
-    assert not verify(CALL, sign(CALL, secret="one"), secret="two")
-
-
-def test_call_url_carries_the_id_and_its_token() -> None:
+def test_the_call_link_is_the_bare_id_and_nothing_else() -> None:
+    """No query string: the link is unauthenticated, and every character it doesn't
+    carry is one more the confirmation text can spend on the appointment."""
     url = urlparse(call_url(CALL))
     assert url.path == f"/c/{CALL}"
-    assert parse_qs(url.query)["t"] == [sign(CALL)]
+    assert url.query == ""
 
 
 def test_call_url_does_not_double_the_slash_on_a_trailing_base(

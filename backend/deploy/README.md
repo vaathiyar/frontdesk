@@ -100,13 +100,13 @@ break it quietly: the key's own quote characters end the value early, python-dot
 to parse the line, and the variable is simply absent — no error, just credentials that
 never arrive. That is the most common way this fails locally.
 
-Three settings have to agree across the two services, and `.env` is what makes them:
+Three settings have to agree across the services, and `.env` is what makes them:
 
 | | why it matters |
 |---|---|
-| `RECEPTIONIST_DATABASE_PATH` | Both mount the `calls` volume at `/data`. The image defaults this to `/data/calls.db`; override it and they stop sharing calls. |
-| `RECEPTIONIST_LINK_SECRET` | Signs the links. If the two disagree, **every link already texted 404s**. Set a real value — the default is a placeholder. |
-| `RECEPTIONIST_PUBLIC_BASE_URL` | Baked into each text at send time. Must be the address a phone can reach, not `localhost`. Changing it does not fix links already sent. |
+| `RECEPTIONIST_DATABASE_URL` | Every service points at the same CockroachDB cluster. If the worker and the web process disagree, the link in each text resolves against a database the call was never written to. Required — neither starts without it. |
+| `RECEPTIONIST_PUBLIC_BASE_URL` | Baked into each text at send time, and it addresses **the SPA**, not this backend. Must be reachable from a phone, not `localhost`. Changing it does not fix links already sent. |
+| `RECEPTIONIST_CORS_ORIGINS` | The SPA's origin, as the browser sends it. Wrong here and the page loads but every fetch is blocked. |
 
 Model weights (Silero VAD) are baked in at build time, so containers start cold-fast.
 
@@ -143,9 +143,14 @@ Then set `RECEPTIONIST_PUBLIC_BASE_URL` to the tunnel URL **before** placing cal
 ### On Coolify
 
 Deploy the same image twice next to your LiveKit stack — once with
-`uv run agent.py start`, once with `uv run fastapi run`. Give both the same volume and env,
-and expose a domain for the web one only. Scale the worker by adding replicas; one worker
-handles several concurrent calls.
+`uv run agent.py start`, once with `uv run fastapi run`. Give both the same env, and expose
+a domain for the web one only. Run `uv run alembic upgrade head` once against the cluster
+before the first deploy. Scale the worker by adding replicas; one worker handles several
+concurrent calls.
+
+The SPA is deployed separately, to its own origin — this image serves JSON and never
+markup. Point `RECEPTIONIST_PUBLIC_BASE_URL` at the SPA and name that origin in
+`RECEPTIONIST_CORS_ORIGINS`.
 
 The compose file works unmodified under the Docker Compose build pack. Two settings:
 

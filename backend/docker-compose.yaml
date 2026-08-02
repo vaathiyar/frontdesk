@@ -1,11 +1,15 @@
-# The receptionist: a voice worker and the web process its confirmation links point at.
+# The receptionist: a voice worker, and the JSON API the SPA reads.
 #
 #   cd backend
 #   docker compose up -d --build
 #
-# Both services run the same image and share one SQLite volume — the worker writes each
-# finished call, the web process is what serves it back. They
-# must also share RECEPTIONIST_LINK_SECRET, which comes from the environment for both.
+# All three services run the same image and point at the same CockroachDB cluster via
+# RECEPTIONIST_DATABASE_URL — the worker writes each finished call, the web process
+# serves it back. Nothing is stored in a container, so there is no volume.
+#
+# The SPA is NOT here. It is a separate origin, deployed separately; this image serves
+# JSON and never markup. RECEPTIONIST_CORS_ORIGINS has to name the SPA's origin, and
+# RECEPTIONIST_PUBLIC_BASE_URL has to point at it, since /c/{id} is its route, not ours.
 #
 # This file sits beside the Dockerfile, not under deploy/, and every path in it is relative
 # to this directory. That is what makes it portable: Compose resolves `context:` and
@@ -16,19 +20,31 @@
 
 services:
   worker:
+    image: receptionist
+    command: ["uv", "run", "agent.py", "start"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    # Dials out to LiveKit over a WebSocket; SIP media terminates at LiveKit, not here.
+    # No inbound ports, no domain, no health check.
+    restart: unless-stopped
+
+  # Runs once, then exits: brings the `calls` table up to head before anything writes
+  # to it. Idempotent — `up` again and Alembic finds nothing to do. Both other services
+  # wait on it completing, so a fresh cluster is usable without a manual step.
+  migrate:
     build:
       context: .
       dockerfile: Dockerfile
     image: receptionist
-    command: ["uv", "run", "agent.py", "start"]
+    command: ["uv", "run", "alembic", "upgrade", "head"]
     env_file:
       - path: .env
         required: false
-    volumes:
-      - calls:/data
-    # Dials out to LiveKit over a WebSocket; SIP media terminates at LiveKit, not here.
-    # No inbound ports, no domain, no health check.
-    restart: unless-stopped
+    restart: "no"
 
   # Runs once, then exits: applies deploy/sip/numbers.json to LiveKit so each DID is
   # answered as the right business. Idempotent — `up` again and it reconciles.
@@ -44,7 +60,9 @@ services:
 
   web:
     image: receptionist
-    depends_on: [worker]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     # `fastapi run` reads the app from [tool.fastapi] in pyproject.toml and binds
     # 0.0.0.0:8000, which is what a container needs. (`fastapi dev` binds 127.0.0.1.)
     command: ["uv", "run", "fastapi", "run"]
@@ -61,9 +79,4 @@ services:
     # automatically for a bare `docker compose up`, and ignores it whenever -f names this
     # file explicitly — which is how a platform invokes it. One file per audience, no flags.
     expose: ["8000"]
-    volumes:
-      - calls:/data
     restart: unless-stopped
-
-volumes:
-  calls:

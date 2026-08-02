@@ -32,6 +32,18 @@ def never_text_anyone(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Blank the database URL for every test, for the same reason as the two below.
+
+    A dev machine's `.env` names a real CockroachDB cluster. No test opens a connection
+    today — the suite swaps `SqlCallStore` for `FakeCallStore` — but the engine builds
+    itself lazily on first use, so a future test that forgot the double would reach the
+    live cluster instead of failing. With no URL it raises `DatabaseNotConfigured`.
+    """
+    monkeypatch.setattr(settings, "database_url", "")
+
+
+@pytest.fixture(autouse=True)
 def no_google_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     """Blank the service-account credentials for every test, for the same reason.
 

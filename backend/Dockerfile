@@ -4,11 +4,11 @@
 #
 #   agent.py start   the LiveKit voice worker — answers calls, dials OUT to LiveKit,
 #                    exposes no ports
-#   fastapi run      the web process the confirmation links point at — needs an inbound
-#                    port and a publicly reachable URL
+#   fastapi run      the JSON API the SPA reads — needs an inbound port
 #
-# Both read the same SQLite file, so they must share a volume: the worker writes the
-# call, the web process resolves the link that was texted about it.
+# Both talk to the same CockroachDB cluster (RECEPTIONIST_DATABASE_URL): the worker
+# writes each finished call, the web process serves the one a texted link refers to.
+# Nothing is stored in the container, so there is no volume to mount.
 #
 #   docker build -t receptionist .                      # context: backend/
 #   docker compose -f deploy/docker-compose.yml up -d    # both services
@@ -52,9 +52,6 @@ RUN apt-get update \
 RUN adduser --disabled-password --gecos "" --home /app --shell /sbin/nologin --uid ${UID} appuser
 WORKDIR /app
 COPY --from=build --chown=appuser:appuser /app /app
-# Where the shared SQLite file lives. Mount a volume here or calls vanish on restart.
-RUN mkdir -p /data && chown appuser:appuser /data
-ENV RECEPTIONIST_DATABASE_PATH=/data/calls.db
 USER appuser
 # The voice worker by default. A fixed CMD with no wrapper script, so LiveKit's graceful
 # drain on SIGTERM reaches the process and live calls aren't cut off mid-sentence.

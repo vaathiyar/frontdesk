@@ -7,20 +7,18 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
 from receptionist.core.models import Booking, CallRecord, Message, Outcome
-from receptionist.core.store import CallStore
 from receptionist.settings import settings
 from receptionist.worker.lifecycle import finish_call
 from receptionist.worker.messaging import telnyx as sms
 from receptionist.worker.messaging.compose import compose_sms, confirmation, plain
 from receptionist.worker.profiles import get_profile
-from tests.support.fakes import CALLER, ScriptedModel, says
+from tests.support.fakes import CALLER, FakeCallStore, ScriptedModel, says
 
 REAL_NUMBER = "+16045551234"
 STARTS = datetime(2026, 7, 29, 10, 0, tzinfo=UTC)
@@ -300,11 +298,11 @@ async def test_a_telnyx_rejection_surfaces_its_reason(
 
 
 async def test_a_failed_text_still_saves_the_call(
-    tmp_path: Path, telnyx_configured: Any, monkeypatch: pytest.MonkeyPatch
+    telnyx_configured: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Losing the record because the text failed would be the worse of two failures."""
     _use_transport(monkeypatch, httpx.MockTransport(lambda _: httpx.Response(500, json={})))
-    store = CallStore(tmp_path / "calls.db")
+    store = FakeCallStore()
     record = booked_call(caller_number=REAL_NUMBER)
     record.said("caller", "my furnace quit")
 
@@ -318,20 +316,18 @@ async def test_a_failed_text_still_saves_the_call(
     assert [e.type for e in saved.events] == ["sms_failed"]
 
 
-async def test_a_caller_who_never_spoke_is_marked_abandoned(tmp_path: Path) -> None:
-    store = CallStore(tmp_path / "calls.db")
+async def test_a_caller_who_never_spoke_is_marked_abandoned() -> None:
+    store = FakeCallStore()
     record = CallRecord(profile_id="hvac", caller_number=CALLER)
 
     assert await finish_call(get_profile("hvac"), record, store=store) == ""
     assert record.outcome is Outcome.ABANDONED
 
 
-async def test_a_caller_who_only_asked_a_question_was_answered_not_abandoned(
-    tmp_path: Path,
-) -> None:
+async def test_a_caller_who_only_asked_a_question_was_answered_not_abandoned() -> None:
     """No tool sets an outcome for a plain question, since the facts are in the prompt.
     Reporting that call as abandoned would misrepresent it to the business owner."""
-    store = CallStore(tmp_path / "calls.db")
+    store = FakeCallStore()
     record = CallRecord(profile_id="hvac", caller_number=CALLER)
     record.said("agent", "Thanks for calling.")
     record.said("caller", "what are your hours?")

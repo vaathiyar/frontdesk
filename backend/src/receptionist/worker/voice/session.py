@@ -31,6 +31,7 @@ from langgraph.errors import GraphRecursionError
 from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
 from livekit.plugins import langchain
 
+from receptionist.core.db.engine import require_database
 from receptionist.core.models import CallRecord
 from receptionist.worker.agent.graph import RECURSION_LIMIT, STUCK, build_graph
 from receptionist.worker.agent.tools import CallContext
@@ -227,9 +228,12 @@ def _called_number(ctx: JobContext) -> str:
 def main() -> None:
     # Before the first call, not during it. A caller listening to the agent fall over is
     # the worst place to discover a profile has no calendar, and a confirmation text that
-    # never goes out is worse still — nobody notices that one at all.
+    # never goes out is worse still — nobody notices that one at all. A database the
+    # worker cannot reach is the same failure again: the call goes fine, the text goes
+    # out, and the link in it resolves to nothing.
     require_calendar_ids(PROFILES)
     require_credentials()
+    require_database()
     cli.run_app(
         WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm, agent_name=AGENT_NAME)
     )

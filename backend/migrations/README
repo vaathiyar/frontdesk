@@ -1,0 +1,13 @@
+Schema history for the `calls` table.
+
+    uv run alembic upgrade head                        apply
+    uv run alembic upgrade head --sql                  read the DDL without connecting
+    uv run alembic revision --autogenerate -m "..."    write the next one
+
+The connection comes from RECEPTIONIST_DATABASE_URL, not from alembic.ini — see env.py.
+`docker compose up` runs `upgrade head` as a one-shot before the worker and web start.
+
+Only the columns are versioned here. The `record` JSONB column holds a whole `CallRecord`
+and needs no migration when that model gains a field: old rows simply lack the key, and
+pydantic's defaults fill it in on read. A migration is needed only when a *column* changes
+— which means when something new has to be queryable.

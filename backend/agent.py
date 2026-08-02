@@ -8,7 +8,8 @@ Run with the standard subcommands:
 
 Every call arrives over SIP: the dispatch rule says which business it is for, so there is
 no local no-telephony mode. The worker refuses to start unless every registered profile
-has a Google Calendar configured.
+has a Google Calendar configured, Telnyx can send, and a database is reachable — each of
+those would otherwise fail with, or just after, a caller on the line.
 
 `.env` is loaded into the process environment first so the LiveKit SDK sees its connection
 vars (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET). Gemini and the Google Cloud

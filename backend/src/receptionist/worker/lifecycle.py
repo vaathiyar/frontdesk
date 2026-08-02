@@ -15,8 +15,8 @@ from datetime import UTC, datetime
 
 from langchain_core.language_models import BaseChatModel
 
+from receptionist.core.db.store import CallStore, SqlCallStore
 from receptionist.core.models import CallRecord, Outcome
-from receptionist.core.store import CallStore
 from receptionist.worker.messaging.compose import compose_sms
 from receptionist.worker.messaging.telnyx import SmsError, SmsSkipped, send_sms
 from receptionist.worker.profiles import Profile
@@ -40,7 +40,7 @@ async def finish_call(
     if text:
         await _notify(record, text)
 
-    await (store or CallStore()).save(record)
+    await (store or SqlCallStore()).save(record)
     return text
 
 

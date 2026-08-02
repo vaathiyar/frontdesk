@@ -1,8 +1,10 @@
 """The web process: FastAPI.
 
-    app.py      the app, and the routers it includes
-    routes/     one module per resource
+    app.py      the app, the CORS allowlist, and the routers it includes
+    deps.py     what routes depend on — the CallStore seam
+    routes/     one module per resource: health.py, calls.py
 
-Only the health check exists today. The JSON API the SPA reads is specified in
-`docs/frontend_spec.md` §7 and lands here as `routes/calls.py` plus its response schemas.
+`GET /api/calls/{id}` is the whole API. It returns `CallRecord` directly, and it is what
+the link in every confirmation text resolves to. Serving markup is not this process's
+job: the SPA is a separate origin.
 """

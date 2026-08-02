@@ -19,6 +19,17 @@ dependencies = [
     # The web process. [standard] brings the `fastapi` CLI and uvicorn, so there is no
     # launcher script — `fastapi run` reads the entrypoint from [tool.fastapi] below.
     "fastapi[standard]>=0.115",
+    # Where finished calls live: CockroachDB, over SQLAlchemy.
+    #
+    # psycopg 3 rather than asyncpg because it is BOTH sync and async, so one driver
+    # serves the app's async engine and Alembic's sync one; asyncpg would have meant
+    # psycopg2 alongside it. sqlalchemy-cockroachdb is never imported — SQLAlchemy loads
+    # it from the `cockroachdb+psycopg://` URL scheme — but a plain `postgresql://` URL
+    # skips it, and Alembic then fails on CockroachDB's introspection quirks.
+    "sqlalchemy[asyncio]>=2.0",
+    "sqlalchemy-cockroachdb>=2.0.4",
+    "psycopg[binary]>=3.2",
+    "alembic>=1.14",
     # Telnyx is one POST; no vendor SDK.
     "httpx>=0.28",
     "pydantic>=2.7",

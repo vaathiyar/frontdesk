@@ -7,8 +7,16 @@ next to the code that uses them (worker/agent/graph.py, worker/voice/speech.py).
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# CockroachDB hands you a `postgresql://` string, and SQLAlchemy needs the `cockroachdb`
+# prefix to load the right dialect — `postgresql://` reaches the database but leaves
+# Alembic introspecting it as plain Postgres, which fails in ways that don't say so. So
+# the scheme is rewritten here and everything after it is passed through untouched, which
+# is what lets the connection string be pasted in exactly as CockroachDB gives it.
+_CRDB_SCHEMES = ("postgresql://", "postgres://")
+_CRDB_DRIVER = "cockroachdb+psycopg://"
 
 
 class Settings(BaseSettings):
@@ -39,10 +47,25 @@ class Settings(BaseSettings):
     calendar_ids: dict[str, str] = {}
     timezone: str = "America/Vancouver"
 
-    # Signed call-detail links, and where the SMS points.
-    link_secret: str = "dev-insecure-secret-change-me"
+    # Where the SMS points: the SPA's origin, since it is the SPA that serves /c/{id}.
     public_base_url: str = "http://localhost:8000"
-    database_path: str = "calls.db"
+
+    # CockroachDB. Paste the connection string as-is, password and all — the validator
+    # below fixes the scheme. No default: an empty value raises DatabaseNotConfigured at
+    # startup (core/db/engine.py) rather than silently writing calls nowhere.
+    database_url: str = ""
+
+    # Which origins the SPA may call the API from. Unused locally, where Vite proxies
+    # /api and the browser sees one origin; it is the deployed SPA's host that needs it.
+    cors_origins: list[str] = ["http://localhost:5173"]
+
+    @field_validator("database_url")
+    @classmethod
+    def _use_the_cockroach_dialect(cls, url: str) -> str:
+        for scheme in _CRDB_SCHEMES:
+            if url.startswith(scheme):
+                return _CRDB_DRIVER + url.removeprefix(scheme)
+        return url
 
 
 settings = Settings()
