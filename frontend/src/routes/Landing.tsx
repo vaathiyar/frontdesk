@@ -23,7 +23,7 @@ const LINES: DemoLine[] = [
     display: '+1 604 296 9870',
     dial: '+16042969870',
     blurb: 'Books service visits — furnace and AC repairs, and seasonal tune-ups.',
-    area: 'Burnaby · New Westminster · Coquitlam',
+    area: 'Greater Vancouver Area',
   },
   {
     vertical: 'Restaurant',

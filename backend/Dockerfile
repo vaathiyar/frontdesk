@@ -46,8 +46,13 @@ RUN uv run python -m livekit.agents download-files
 FROM base
 ARG UID=10001
 # onnxruntime (Silero VAD) needs libgomp at runtime; not in the slim base.
+#
+# ca-certificates is what `sslrootcert=system` resolves to when psycopg verifies
+# CockroachDB's certificate. It is NOT already covered by the HTTPS this image
+# does elsewhere: httpx trusts certifi's bundled roots, while libpq reads the OS
+# store, so Telnyx and Google working proves nothing about the database.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgomp1 \
+    && apt-get install -y --no-install-recommends libgomp1 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN adduser --disabled-password --gecos "" --home /app --shell /sbin/nologin --uid ${UID} appuser
 WORKDIR /app

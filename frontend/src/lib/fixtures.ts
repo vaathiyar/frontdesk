@@ -627,7 +627,7 @@ const hvacAnswered = (): CallRecord => ({
     {
       ts: '2026-07-31T20:21:03.083189Z',
       role: 'agent',
-      text: "We do — Burnaby, New Westminster and Coquitlam. We're open Monday to Saturday, eight in the morning to six in the evening.",
+      text: "We do — we cover the whole Greater Vancouver Area. We're open Monday to Saturday, eight in the morning to six in the evening.",
     },
     {
       ts: '2026-07-31T20:21:17.662323Z',

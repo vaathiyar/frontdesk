@@ -54,15 +54,14 @@ HVAC = Profile(
     greeting="Thanks for calling Helpdesk Heating and Cooling. How can I help?",
     does=(
         "You book service visits: furnace and AC repair, maintenance, and seasonal "
-        "tune-ups, for all makes and models. The service area is Burnaby, New "
-        "Westminster and Coquitlam. If a caller is outside it, take a message instead "
-        "of booking."
+        "tune-ups, for all makes and models. The service area is the Greater Vancouver "
+        "Area. If a caller is outside it, take a message instead of booking."
     ),
     knowledge=(
-        "Hours are Monday to Saturday, 8am to 6pm. The service area is Burnaby, New "
-        "Westminster and Coquitlam. We repair and maintain furnaces and AC units of all "
-        "makes and models, and do seasonal tune-ups. Estimates on new installations are "
-        "free. Annual maintenance plans are available."
+        "Hours are Monday to Saturday, 8am to 6pm. We serve the Greater Vancouver Area. "
+        "We repair and maintain furnaces and AC units of all makes and models, and do "
+        "seasonal tune-ups. Estimates on new installations are free. Annual maintenance "
+        "plans are available."
     ),
     tools=(check_availability, book, reschedule, cancel, take_message, end_call),
 )
