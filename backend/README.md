@@ -19,7 +19,7 @@ business-specific lives in the prompt and the tools.
 
 ```bash
 uv sync
-uv run pytest -q     # 171 tests, offline: no network, no API key, no database
+uv run pytest -q     # 174 tests, offline: no network, no API key, no database
 ```
 
 The suite is the way to exercise the agent without telephony. Every guarantee it states
@@ -30,7 +30,7 @@ took a slot.
 
 | Command | What it does | Needs |
 |---|---|---|
-| `uv run pytest -q` | 171 offline tests | — |
+| `uv run pytest -q` | 174 offline tests | — |
 | `uv run fastapi dev` | The JSON API the SPA reads | `RECEPTIONIST_DATABASE_URL` |
 | `uv run agent.py dev` / `start` | The voice worker, against your LiveKit server | Google (key + JSON) + `LIVEKIT_*` |
 | `uv run python deploy/sip/provision.py` | Point each DID at the right profile | `LIVEKIT_*` |
@@ -77,9 +77,22 @@ For credentials under Docker, set `GOOGLE_CREDENTIALS_JSON` — compose mounts n
    process and renders the record. Unauthenticated: the id is a random UUID and the link
    goes to the caller's own phone.
 
-The confirmation text is split by what can be trusted with what: Gemini writes the opening
-sentence or two and is *forbidden* from stating the date or time; the appointment facts and
-the link are built from the record. If the model call fails, the facts go out alone.
+**Every word of the confirmation text is rendered from the record, never written.** A
+hallucinated time in a message going out under the business's name is the one error that
+costs someone a morning, so there is no model call on this path:
+
+```
+Helpdesk Heating and Cooling
+
+Booked: Furnace repair
+Wed Jul 29, 10:00 AM
+12 Oak St, Burnaby
+
+Details: https://frontdesk.demo/c/8235e53f-...
+```
+
+`Booked:` becomes `Moved:`, `Cancelled:` or `Message taken for` — same shape either way, so
+a caller who has had one of these reads the next at a glance.
 
 ## Environment
 

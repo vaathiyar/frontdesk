@@ -13,8 +13,6 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from langchain_core.language_models import BaseChatModel
-
 from receptionist.core.db.store import CallStore, SqlCallStore
 from receptionist.core.models import CallRecord, Outcome
 from receptionist.worker.messaging.compose import compose_sms
@@ -25,18 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 async def finish_call(
-    profile: Profile,
-    record: CallRecord,
-    *,
-    store: CallStore | None = None,
-    model: BaseChatModel | None = None,
+    profile: Profile, record: CallRecord, *, store: CallStore | None = None
 ) -> str:
     """Close the call, text the caller, persist it. Returns the text that was composed."""
     record.ended_at = datetime.now(UTC)
     if record.outcome is None:
         record.outcome = _what_happened(record)
 
-    text = await compose_sms(profile, record, model)
+    text = compose_sms(profile, record)
     if text:
         await _notify(record, text)
 

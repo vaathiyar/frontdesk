@@ -16,9 +16,9 @@ from receptionist.core.models import Booking, CallRecord, Message, Outcome
 from receptionist.settings import settings
 from receptionist.worker.lifecycle import finish_call
 from receptionist.worker.messaging import telnyx as sms
-from receptionist.worker.messaging.compose import compose_sms, confirmation, plain
+from receptionist.worker.messaging.compose import compose_sms, plain
 from receptionist.worker.profiles import get_profile
-from tests.support.fakes import CALLER, FakeCallStore, ScriptedModel, says
+from tests.support.fakes import CALLER, FakeCallStore
 
 REAL_NUMBER = "+16045551234"
 STARTS = datetime(2026, 7, 29, 10, 0, tzinfo=UTC)
@@ -42,62 +42,91 @@ def booked_call(**overrides: Any) -> CallRecord:
 # --- what it says ---------------------------------------------------------------
 
 
-def test_confirmation_states_the_business_service_and_time() -> None:
-    text = confirmation(get_profile("hvac"), booked_call())
+def test_a_booking_states_the_business_service_time_and_place() -> None:
+    text = compose_sms(get_profile("hvac"), booked_call())
 
     assert "Helpdesk Heating and Cooling" in text
-    assert "Booked: furnace repair" in text
-    assert "10:00 AM" in text
+    assert "Booked: Furnace repair" in text
+    assert "Wed Jul 29, 10:00 AM" in text
     assert "12 Oak St, Burnaby" in text
-    assert "Details + add to calendar:" in text
+    assert "Details: http" in text
 
 
-def test_confirmation_says_moved_for_a_reschedule() -> None:
-    text = confirmation(get_profile("hvac"), booked_call(outcome=Outcome.RESCHEDULED))
-    assert "Moved: furnace repair" in text
+def test_the_service_is_capitalised_without_flattening_an_acronym() -> None:
+    """`book`'s `service` argument is the model's wording, so its case is not ours to
+    trust -- but "AC" must not become "Ac"."""
+    booking = Booking(service="AC tune-up", starts_at=STARTS, ends_at=STARTS)
+    assert "Booked: AC tune-up" in compose_sms(get_profile("hvac"), booked_call(booking=booking))
+
+
+def test_a_single_digit_day_is_not_zero_padded() -> None:
+    starts = datetime(2026, 7, 9, 10, 0, tzinfo=UTC)
+    booking = Booking(service="furnace repair", starts_at=starts, ends_at=starts)
+    text = compose_sms(get_profile("hvac"), booked_call(booking=booking))
+
+    assert "Thu Jul 9, 10:00 AM" in text
+    assert "Jul 09" not in text
+
+
+def test_a_reschedule_says_moved() -> None:
+    text = compose_sms(get_profile("hvac"), booked_call(outcome=Outcome.RESCHEDULED))
+    assert "Moved: Furnace repair" in text
     assert "Booked:" not in text
 
 
-def test_confirmation_covers_a_cancellation() -> None:
+def test_a_cancellation_claims_no_service_or_time_it_no_longer_has() -> None:
+    """`tools.cancel` clears the booking, so there is nothing left to name. Saying so
+    plainly beats reading it back out of an event summary."""
     record = CallRecord(profile_id="hvac", caller_number=CALLER)
     record.outcome = Outcome.CANCELLED
-    assert "cancelled" in confirmation(get_profile("hvac"), record)
+    text = compose_sms(get_profile("hvac"), record)
+
+    assert "Cancelled: your appointment" in text
+    assert "AM" not in text and "PM" not in text
 
 
-def test_confirmation_covers_a_taken_message() -> None:
+def test_a_taken_message_names_who_it_is_from() -> None:
     record = CallRecord(profile_id="hvac", caller_number=CALLER)
     record.outcome = Outcome.MESSAGE_TAKEN
     record.message = Message(name="Dana", reason="boiler quote")
-    text = confirmation(get_profile("hvac"), record)
+    text = compose_sms(get_profile("hvac"), record)
 
+    assert "Message taken for Dana" in text
     assert "call you back" in text
-    assert "Call details:" in text
+
+
+def test_every_variant_has_the_same_shape() -> None:
+    """A caller who has had one of these should read the next at a glance."""
+    cancelled = CallRecord(profile_id="hvac", caller_number=CALLER, outcome=Outcome.CANCELLED)
+    for record in (booked_call(), cancelled):
+        body = compose_sms(get_profile("hvac"), record).splitlines()
+        assert body[0] == "Helpdesk Heating and Cooling"
+        assert body[1] == ""
+        assert ":" in body[2]
+        assert body[-2] == ""
+        assert body[-1].startswith("Details: ")
 
 
 def test_nothing_is_texted_when_the_call_produced_nothing() -> None:
     record = CallRecord(profile_id="hvac", caller_number=CALLER)
     record.outcome = Outcome.ABANDONED
-    assert confirmation(get_profile("hvac"), record) == ""
+    assert compose_sms(get_profile("hvac"), record) == ""
 
 
-async def test_an_abandoned_call_is_never_texted() -> None:
-    record = CallRecord(profile_id="hvac", caller_number=CALLER)
-    record.outcome = Outcome.ABANDONED
-    record.said("caller", "never mind")
-    assert await compose_sms(get_profile("hvac"), record, ScriptedModel()) == ""
-
-
-async def test_the_message_stays_gsm7_so_it_costs_one_segment_per_160_chars() -> None:
-    """A single em-dash or emoji drops SMS capacity from 160 characters to 70."""
-    record = booked_call()
-    record.said("caller", "my furnace quit")
-    model = ScriptedModel(replies=[says("Hi Sam — you’re all set… 🎉 “great”")])
-
-    text = await compose_sms(get_profile("hvac"), record, model)
+def test_the_message_stays_gsm7_so_it_costs_one_segment_per_160_chars() -> None:
+    """A single em-dash or emoji drops SMS capacity from 160 characters to 70. The model
+    no longer writes prose, but the service and address are still its tool arguments."""
+    booking = Booking(
+        service="furnace “repair”",
+        starts_at=STARTS,
+        ends_at=STARTS,
+        details={"address": "12 Oak St — Burnaby… 🎉"},
+    )
+    text = compose_sms(get_profile("hvac"), booked_call(booking=booking))
 
     assert text.isascii()
-    assert "—" not in text and "🎉" not in text
-    assert "Hi Sam - you're all set..." in text
+    assert 'Booked: Furnace "repair"' in text
+    assert "12 Oak St - Burnaby..." in text
 
 
 def test_plain_leaves_ordinary_text_alone() -> None:
@@ -306,9 +335,7 @@ async def test_a_failed_text_still_saves_the_call(
     record = booked_call(caller_number=REAL_NUMBER)
     record.said("caller", "my furnace quit")
 
-    await finish_call(
-        get_profile("hvac"), record, store=store, model=ScriptedModel(replies=[says("All set.")])
-    )
+    await finish_call(get_profile("hvac"), record, store=store)
 
     assert [e.type for e in record.events] == ["sms_failed"]
     saved = await store.get(record.id)
